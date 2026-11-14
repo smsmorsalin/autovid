@@ -24,14 +24,23 @@ video:
 target_seconds: 75             # rough length the script writer aims for
 
 llm:
-  provider: anthropic
-  model: claude-sonnet-5-5
-  research: true               # use web search to gather sourced facts before writing
+  provider: gemini             # gemini (free key from aistudio.google.com) | anthropic (paid)
+  model: gemini-2.5-flash      # check the current free models in Google AI Studio and change here if needed
+  research: true               # use Google Search grounding to gather sourced facts before writing
+  # only for provider: anthropic
   web_search_tool: web_search_20250305
   max_search_uses: 6
 
 images:
-  provider: fal                # fal (Flux) | openai | placeholder (offline test, no API key)
+  provider: [cloudflare, pollinations]   # tried in order. Others: fal, openai (paid), placeholder (offline test)
+  cloudflare:                  # free daily allowance. Needs CF_ACCOUNT_ID + CF_API_TOKEN
+    model: "@cf/black-forest-labs/flux-1-schnell"
+    steps: 6
+    # width: 768             # set both if the chosen model supports portrait sizes
+    # height: 1344
+  pollinations:                # no key; anonymous use is rate limited (about 1 image / 15 s)
+    model: flux
+    min_interval: 16
   fal_model: fal-ai/flux/dev
   openai_model: gpt-image-1
   label_ai_visuals: true       # show the "প্রতীকী দৃশ্য" (representative scene) tag on AI-made visuals
@@ -46,7 +55,8 @@ i2v:                           # optional image-to-video for the 3D-look style
   seconds: 5
 
 tts:
-  provider: edge               # edge (free, Bengali voices) | elevenlabs | silent (offline test)
+  provider: [edge, gtts]       # tried in order. edge = free Microsoft voices, gtts = free Google voice. Others: elevenlabs (paid), silent (test)
+  gtts_lang: bn
   edge_voice: bn-BD-NabanitaNeural     # alternatives: bn-BD-PradeepNeural, bn-IN-TanishaaNeural
   edge_rate: "+0%"
   elevenlabs_voice_id: ""

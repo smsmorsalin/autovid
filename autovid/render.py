@@ -151,7 +151,7 @@ def bg_html(scene, style, image_path):
                 f"</body></html>")
     base = "<html><head><style>" + BASE_CSS + CARD_CSS + "</style></head><body style='background:#0a0c13'>"
     if k == "image":
-        base += (f"<div class='abs' style='left:0;right:0;top:0;height:1360px;background:url({data_uri(image_path)}) center/cover;"
+        base += (f"<div class='abs' style='left:0;right:0;top:0;height:1360px;background:url({data_uri(image_path)}) top/cover;"
                  f"-webkit-mask-image:linear-gradient(#000 72%,transparent);mask-image:linear-gradient(#000 72%,transparent)'></div>")
     else:
         base += ("<div class='abs' style='inset:0;background:radial-gradient(900px 700px at 50% 35%,#131c36,#0a0c13)'></div>"

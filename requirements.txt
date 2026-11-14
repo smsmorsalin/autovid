@@ -4,3 +4,4 @@ pillow>=10.0
 numpy>=1.26
 playwright>=1.44
 edge-tts>=6.1.10
+gTTS>=2.5

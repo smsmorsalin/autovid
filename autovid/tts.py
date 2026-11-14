@@ -76,13 +76,32 @@ def _eleven(text, out, cfg):
     return out, media_duration(out), (words or None)
 
 
+def _gtts(text, out, cfg):
+    """Google Translate voice: free, no key, robotic but reliable. No word timings."""
+    from gtts import gTTS
+
+    tmp = str(out) + ".raw.mp3"
+    gTTS(text=text, lang=cfg["tts"].get("gtts_lang", "bn")).save(tmp)
+    # slight speed-up sounds more natural; atempo keeps pitch
+    run(["ffmpeg", "-y", "-v", "error", "-i", tmp, "-filter:a", "atempo=1.08", out])
+    pathlib.Path(tmp).unlink(missing_ok=True)
+    return out, media_duration(out), None
+
+
+_IMPL = {"silent": _silent, "edge": _edge, "elevenlabs": _eleven, "gtts": _gtts}
+
+
 def synthesize(text, out, cfg):
-    prov = cfg["tts"]["provider"]
-    out = str(out)
-    if prov == "silent":
-        return _silent(text, out, cfg)
-    if prov == "edge":
-        return _edge(text, out, cfg)
-    if prov == "elevenlabs":
-        return _eleven(text, out, cfg)
-    raise SystemExit(f"unknown tts.provider {prov}")
+    """tts.provider may be one name or a list tried in order (e.g. [edge, gtts])."""
+    provs = cfg["tts"]["provider"]
+    provs = [provs] if isinstance(provs, str) else list(provs)
+    errors = []
+    for name in provs:
+        if name not in _IMPL:
+            raise SystemExit(f"unknown tts.provider {name}")
+        for attempt in range(2):
+            try:
+                return _IMPL[name](text, str(out), cfg)
+            except (Exception, SystemExit) as e:
+                errors.append(f"{name}: {e}")
+    raise RuntimeError("all TTS providers failed:\n" + "\n".join(errors[-4:]))

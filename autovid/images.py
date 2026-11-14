@@ -1,9 +1,11 @@
 """Image providers (placeholder / fal Flux / OpenAI) and optional image-to-video (fal Kling)."""
 import base64
 import hashlib
+import io
 import pathlib
 import random
 import time
+import urllib.parse
 
 import numpy as np
 import requests
@@ -122,27 +124,122 @@ def openai_image(prompt, out, cfg):
     return out
 
 
+# ---------------------------------------------------------------- free providers
+def cloudflare_image(prompt, out, cfg, seed):
+    """Cloudflare Workers AI (free daily allowance). Needs CF_ACCOUNT_ID + CF_API_TOKEN."""
+    c = cfg["images"].get("cloudflare", {})
+    acct, tok = env("CF_ACCOUNT_ID"), env("CF_API_TOKEN")
+    model = c.get("model", "@cf/black-forest-labs/flux-1-schnell")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}"
+    payload = {"prompt": prompt[:2000], "steps": c.get("steps", 6), "seed": seed}
+    if c.get("width") and c.get("height"):
+        payload.update(width=c["width"], height=c["height"])
+    for attempt in range(3):
+        r = requests.post(url, headers={"Authorization": "Bearer " + tok}, json=payload, timeout=300)
+        if r.status_code == 429:
+            time.sleep(15 * (attempt + 1))
+            continue
+        break
+    if r.status_code >= 400:
+        raise RuntimeError(f"Cloudflare image error {r.status_code}: {r.text[:300]}")
+    ct = r.headers.get("content-type", "")
+    if ct.startswith("image/"):
+        pathlib.Path(out).write_bytes(r.content)
+    else:
+        j = r.json()
+        b64 = (j.get("result") or {}).get("image") or j.get("image")
+        if not b64:
+            raise RuntimeError("Cloudflare returned no image: " + str(j)[:300])
+        pathlib.Path(out).write_bytes(base64.b64decode(b64))
+    return out
+
+
+_last_pollinations = [0.0]
+
+
+def pollinations_image(prompt, out, cfg, seed):
+    """Pollinations legacy endpoint: no key. Anonymous use is rate limited (about 1 request / 15 s)."""
+    c = cfg["images"].get("pollinations", {})
+    wait = c.get("min_interval", 16) - (time.time() - _last_pollinations[0])
+    if wait > 0:
+        time.sleep(wait)
+    q = urllib.parse.urlencode({"width": 1080, "height": 1920, "model": c.get("model", "flux"),
+                                "seed": seed, "nologo": "true", "private": "true"})
+    url = "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt[:900]) + "?" + q
+    _last_pollinations[0] = time.time()
+    r = requests.get(url, timeout=300)
+    if r.status_code >= 400 or not r.headers.get("content-type", "").startswith("image/"):
+        raise RuntimeError(f"Pollinations error {r.status_code}: {r.text[:200]}")
+    pathlib.Path(out).write_bytes(r.content)
+    return out
+
+
+PROVIDERS = {
+    "cloudflare": lambda prompt, out, cfg, seed, style: cloudflare_image(prompt, out, cfg, seed),
+    "pollinations": lambda prompt, out, cfg, seed, style: pollinations_image(prompt, out, cfg, seed),
+    "fal": lambda prompt, out, cfg, seed, style: fal_image(prompt, out, cfg, seed),
+    "openai": lambda prompt, out, cfg, seed, style: openai_image(prompt, out, cfg),
+    "placeholder": lambda prompt, out, cfg, seed, style: placeholder(prompt, out, style),
+}
+
+
+# ---------------------------------------------------------------- framing
+def fit_canvas(im, tw, th, anchor="center"):
+    """Make any picture a clean tw x th frame. Near-9:16 -> crop to fill. Otherwise (e.g. square)
+    -> sharp picture at full width over a blurred copy of itself, with soft edges."""
+    im = im.convert("RGB")
+    r = im.width / im.height
+    scale = max(tw / im.width, th / im.height)
+    cover = im.resize((int(im.width * scale) + 1, int(im.height * scale) + 1), Image.LANCZOS)
+    l, t = (cover.width - tw) // 2, (cover.height - th) // 2
+    cover = cover.crop((l, t, l + tw, t + th))
+    if abs(r - tw / th) < 0.06:
+        return cover
+    canvas = cover.filter(ImageFilter.GaussianBlur(45))
+    canvas = Image.eval(canvas, lambda v: int(v * 0.65))
+    fh = int(tw / r)
+    fg = im.resize((tw, fh), Image.LANCZOS)
+    y = 0 if anchor == "top" else (th - fh) // 2
+    feather = min(120, fh // 4)
+    a = np.full((fh, tw), 255, dtype="float32")
+    ramp = np.linspace(0, 255, feather, dtype="float32")[:, None]
+    if anchor != "top":
+        a[:feather] = np.minimum(a[:feather], ramp)
+    a[-feather:] = np.minimum(a[-feather:], ramp[::-1])
+    mask = Image.fromarray(a.astype("uint8"), "L")
+    canvas.paste(fg, (0, y), mask)
+    return canvas
+
+
 def make_image(prompt, out, cfg, style, seed=1):
-    """Generate one scene image and normalise it to 9:16 at the configured size."""
+    """Generate one scene image. images.provider may be one name or a list tried in order (fallback)."""
     out = pathlib.Path(out)
-    prov = cfg["images"]["provider"]
+    provs = cfg["images"]["provider"]
+    provs = [provs] if isinstance(provs, str) else list(provs)
     suffix = cfg["images"]["style_suffix"].get(style, "")
     full = f"{prompt}. {suffix}"
     raw = out.with_suffix(".raw.png")
-    if prov == "placeholder":
-        placeholder(prompt, raw, style)
-    elif prov == "fal":
-        fal_image(full, raw, cfg, seed)
-    elif prov == "openai":
-        openai_image(full, raw, cfg)
+    errors = []
+    for name in provs:
+        if name not in PROVIDERS:
+            raise SystemExit(f"unknown images.provider {name}")
+        for attempt in range(2):
+            try:
+                PROVIDERS[name](prompt if name == "placeholder" else full, raw, cfg, seed + attempt, style)
+                Image.open(raw).verify()
+                break
+            except (Exception, SystemExit) as e:   # SystemExit = missing API key -> try the next provider
+                errors.append(f"{name}: {e}")
+                log(f"image provider {name} failed ({str(e)[:120]})")
+                raw.unlink(missing_ok=True)
+        else:
+            continue
+        break
     else:
-        raise SystemExit(f"unknown images.provider {prov}")
-    im = Image.open(raw).convert("RGB")
-    tw, th = cfg["video"]["width"], cfg["video"]["height"]
-    scale = max(tw / im.width, th / im.height)
-    im = im.resize((int(im.width * scale) + 1, int(im.height * scale) + 1), Image.LANCZOS)
-    l, t = (im.width - tw) // 2, (im.height - th) // 2
-    im.crop((l, t, l + tw, t + th)).save(out)
+        raise RuntimeError("all image providers failed:\n" + "\n".join(errors[-6:]))
+    im = Image.open(raw)
+    anchor = "top" if style == "explainer" else "center"
+    fit_canvas(im, cfg["video"]["width"], cfg["video"]["height"], anchor).save(out)
     raw.unlink(missing_ok=True)
     return out
 

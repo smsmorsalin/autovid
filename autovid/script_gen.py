@@ -1,6 +1,7 @@
 """Topic -> researched facts -> structured scene script (JSON), via the Anthropic API."""
 import json
 import re
+import time
 
 import requests
 
@@ -16,15 +17,19 @@ GRADES = ["none", "sepia", "warm", "cool", "dusk"]
 TONES = ["year", "warn", "good", "neutral"]
 
 
-def _claude(cfg, system, user, tools=None, max_tokens=8000):
+def _anthropic(cfg, system, user, search, max_tokens):
     body = {
         "model": cfg["llm"]["model"],
         "max_tokens": max_tokens,
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
-    if tools:
-        body["tools"] = tools
+    if search:
+        body["tools"] = [{
+            "type": cfg["llm"].get("web_search_tool", "web_search_20250305"),
+            "name": "web_search",
+            "max_uses": cfg["llm"].get("max_search_uses", 6),
+        }]
     headers = {
         "x-api-key": env("ANTHROPIC_API_KEY"),
         "anthropic-version": "2023-06-01",
@@ -33,19 +38,59 @@ def _claude(cfg, system, user, tools=None, max_tokens=8000):
     r = requests.post(API, headers=headers, json=body, timeout=600)
     if r.status_code >= 400:
         raise RuntimeError(f"Anthropic API error {r.status_code}: {r.text[:500]}")
+    return "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
+
+
+def _gemini(cfg, system, user, search, max_tokens):
+    """Google AI Studio (free key). Research uses Google Search grounding; the script call asks for JSON."""
+    model = cfg["llm"]["model"]
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
+    }
+    if search:
+        body["tools"] = [{"google_search": {}}]
+    else:
+        body["generationConfig"]["responseMimeType"] = "application/json"
+    key = env("GEMINI_API_KEY")
+    for attempt in range(5):
+        r = requests.post(url, params={"key": key}, json=body, timeout=600)
+        if r.status_code in (429, 500, 503):          # free tier: rate limited / busy -> wait and retry
+            wait = 20 * (attempt + 1)
+            log(f"Gemini {r.status_code}, retrying in {wait}s")
+            time.sleep(wait)
+            continue
+        break
+    if r.status_code >= 400:
+        raise RuntimeError(f"Gemini API error {r.status_code}: {r.text[:500]}")
     data = r.json()
-    return "".join(b.get("text", "") for b in data["content"] if b.get("type") == "text")
+    cands = data.get("candidates") or []
+    if not cands:
+        raise RuntimeError("Gemini returned no candidates: " + str(data)[:400])
+    parts = cands[0].get("content", {}).get("parts", [])
+    text = "".join(p.get("text", "") for p in parts)
+    if search:  # append the grounding source links so they end up in the description
+        chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
+        links = [c["web"]["uri"] for c in chunks if c.get("web", {}).get("uri")]
+        if links:
+            text += "\n\nSOURCE LINKS found by search:\n" + "\n".join(dict.fromkeys(links))
+    return text
+
+
+def _llm(cfg, system, user, search=False, max_tokens=8000):
+    prov = cfg["llm"].get("provider", "gemini")
+    if prov == "gemini":
+        return _gemini(cfg, system, user, search, max_tokens)
+    if prov == "anthropic":
+        return _anthropic(cfg, system, user, search, max_tokens)
+    raise SystemExit(f"unknown llm.provider {prov}")
 
 
 def research(topic, cfg):
     """Gather verifiable, sourced facts. Returns plain text (bullets with source URLs)."""
-    tools = None
-    if cfg["llm"].get("research", True):
-        tools = [{
-            "type": cfg["llm"].get("web_search_tool", "web_search_20250305"),
-            "name": "web_search",
-            "max_uses": cfg["llm"].get("max_search_uses", 6),
-        }]
+    search = bool(cfg["llm"].get("research", True))
     system = (
         "You are a careful fact researcher for short educational videos. "
         "Only include facts confirmed by at least one reliable source. "
@@ -54,10 +99,10 @@ def research(topic, cfg):
     user = (
         f"Topic: {topic}\n\n"
         "Return 12-20 bullet points of verifiable facts (dates, numbers, names, cause and effect). "
-        "End every bullet with the source URL in parentheses. No opinions, no filler."
+        "End every bullet with the source URL in parentheses when you have one. No opinions, no filler."
     )
     log("researching facts...")
-    return _claude(cfg, system, user, tools=tools, max_tokens=4000)
+    return _llm(cfg, system, user, search=search, max_tokens=4000)
 
 
 SCHEMA_EXAMPLE = """{
@@ -126,7 +171,7 @@ def write_script(topic, facts, style, cfg):
         "sources must list the URLs you actually relied on from FACTS."
     )
     log("writing script...")
-    text = _claude(cfg, system, user, max_tokens=8000)
+    text = _llm(cfg, system, user, search=False, max_tokens=8000)
     return parse_script(text, style)
 
 

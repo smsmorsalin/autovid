@@ -28,33 +28,43 @@ python -m autovid --config config.offline.yaml make \
 ```
 The offline config uses placeholder pictures and silent narration, just to check the layout. `config.yaml` is the real configuration.
 
-## 2. Run for real
+## 2. The all-free stack (no credit card, no payment)
 
-Put keys in the environment (locally `export ...`, in GitHub: repo → Settings → Secrets and variables → Actions).
+| Job | Free service | Secret name(s) |
+|---|---|---|
+| Research + script | Google Gemini API (Google AI Studio free key, Google Search grounding) | `GEMINI_API_KEY` |
+| Images | Cloudflare Workers AI (free daily allowance), with Pollinations (no key) as automatic backup | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
+| Voice | edge-tts (Microsoft Bengali voices), with Google `gTTS` as automatic backup | none |
+| Review on your phone | Telegram bot | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Upload | YouTube Data API (optional, later) | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
+| Scheduler | GitHub Actions | none |
 
-| secret | used for |
-|---|---|
-| `ANTHROPIC_API_KEY` | research + script writing |
-| `FAL_KEY` | images (Flux) and optional image-to-video (Kling). Or use `OPENAI_API_KEY` and set `images.provider: openai` |
-| `ELEVENLABS_API_KEY` | only if `tts.provider: elevenlabs` (edge-tts needs no key) |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | review messages (create a bot with @BotFather) |
-| `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | YouTube upload (Google Cloud → YouTube Data API v3 → OAuth client; get a refresh token once with the `youtube.upload` scope) |
-| `FB_PAGE_ID`, `FB_PAGE_TOKEN` | Facebook Page Reels |
-| `IG_USER_ID` (+ `FB_PAGE_TOKEN`) | Instagram Reels (needs a public URL of the mp4, see below) |
+How to get each key:
+* **Gemini:** aistudio.google.com → *Get API key* (needs only a Google account). Check which Flash model is free there and put its name in `llm.model` in `config.yaml`.
+* **Cloudflare:** free account at cloudflare.com → note your *Account ID* (dashboard sidebar) → *My Profile → API Tokens → Create Token* with the **Workers AI** permission.
+* **Telegram:** message @BotFather → `/newbot` → token. Send your bot a message, open `https://api.telegram.org/bot<TOKEN>/getUpdates`, copy `"chat":{"id": ...}`.
+
+Free tiers change and have daily limits. If a provider hits its limit the run falls back to the next one; if all fail, the run stops with an error instead of posting a bad video.
+
+Paid options still exist in the code (`anthropic`, `fal`, `openai`, `elevenlabs`) but are not used by default.
+
+## 3. Run it
 
 ```bash
-python -m autovid make --topic "ক্যাশ কী" --style explainer --out out/cache --notify
+export GEMINI_API_KEY=... CF_ACCOUNT_ID=... CF_API_TOKEN=...
+python -m autovid make --topic "ক্যাশ কী" --style explainer --out out/cache
 ```
 
-## 3. Put it on a schedule (GitHub Actions)
+## 4. Put it on a schedule (GitHub Actions)
 
-1. Push this folder to a GitHub repo (private is fine).
-2. Add the secrets above.
-3. Edit `topics.txt` (one `style | topic` per line) and `config.yaml` (channel name, handle, voice).
-4. **Daily video** runs every day at 04:00 UTC (10:00 Bangladesh time; change the cron in `.github/workflows/daily.yml`). It takes the next unused topic, builds the video, uploads it as a run artifact and sends it to your Telegram. You can also trigger it by hand with a custom topic.
-5. **Approval:** watch it in Telegram. To publish, run the **Publish** workflow and enter that Daily run's ID (the number in its URL). To skip approval, set `publish.require_approval: false`, and videos go out automatically.
+1. Push this folder to a GitHub repo. Private repos get 2,000 free Actions minutes a month (one video a day fits); public repos are free without that limit (your secrets stay hidden).
+2. Settings → Secrets and variables → Actions → add the secrets above.
+3. Settings → Actions → General → Workflow permissions → *Read and write*.
+4. Edit `topics.txt` (one `style | topic` per line) and `config.yaml` (channel name, handle, voice).
+5. **Daily video** runs every day at 04:00 UTC (10:00 Bangladesh time; edit the cron in `.github/workflows/daily.yml`). It also has a *Run workflow* button where you can type a one-off topic.
+6. **Approval:** watch the video in Telegram. To publish, run the **Publish** workflow and enter that Daily run's ID. Set `publish.require_approval: false` to post automatically.
 
-Tip: start with `publish.privacy: private` and one platform until you trust the output.
+Start with `publish.privacy: private` and one platform until you trust the output.
 
 ## Quality and safety checks built in (keep them)
 
@@ -72,9 +82,9 @@ The Instagram API only accepts a **public https URL** of the video. Upload `fina
 
 * **Look & feel:** `render.py` (colours, layout, caption style) and `config.yaml` (`images.style_suffix`, series name, end card).
 * **Voice:** `tts.edge_voice` (`bn-BD-NabanitaNeural`, `bn-BD-PradeepNeural`, `bn-IN-TanishaaNeural`) or switch to ElevenLabs for more natural narration.
-* **More motion in 3D style:** set `i2v.provider: fal_kling` (costs a few dollars per video).
+* **More motion in 3D style:** image-to-video (`i2v.provider: fal_kling`) is paid, so the free setup uses slow zoom/pan instead.
 * **Music:** set `video.music` to a royalty-free mp3 you have the right to use.
-* **Cost** (rough): script ~ cents, images ~ a few cents each (20-25 per video), edge-tts free. Image-to-video is the main extra cost.
+* **Free-limit budget:** one video uses about 20 images, 2 Gemini calls and about 10-20 Actions minutes.
 
 ## Known limits
 
