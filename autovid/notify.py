@@ -3,6 +3,8 @@ import pathlib
 
 import requests
 
+import json
+
 from .util import env, log, read_json
 
 
@@ -13,7 +15,14 @@ def telegram(out_dir, text_extra=""):
         return
     out_dir = pathlib.Path(out_dir)
     meta = read_json(out_dir / "meta.json")
-    caption = (f"Ready for review: {meta['title']}\n\n{text_extra}\n"
+    warn = ""
+    try:
+        sc = json.loads((out_dir / "script.json").read_text(encoding="utf-8"))
+        if sc.get("facts_verified") is False:
+            warn = "WARNING: web search was unavailable, facts come from AI memory. Check every date and number!\n\n"
+    except Exception:
+        pass
+    caption = (f"{warn}Ready for review: {meta['title']}\n\n{text_extra}\n"
                "To publish: run the 'Publish' workflow with this run's ID.")[:1000]
     video = out_dir / "final.mp4"
     with open(video, "rb") as f:
