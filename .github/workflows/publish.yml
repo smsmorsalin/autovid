@@ -1,0 +1,41 @@
+name: Publish
+
+# Approval step: after you watch the video in Telegram, run this workflow with that run's ID.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run ID of the 'Daily video' run to publish (the number in its URL)"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests pyyaml
+
+      - name: Download the approved video
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: gh run download "$RUN_ID" --repo "${{ github.repository }}" -n video -D approved
+
+      - name: Publish
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+        run: python -m autovid publish --dir approved

@@ -1,0 +1,7 @@
+# One topic per line, format:  style | topic
+# style = explainer (concept taught with an analogy + UI cards) or timeline3d (dated story with 3D-look scenes)
+# The scheduler takes the first line not yet produced (tracked in state/done.json).
+explainer | ডেটাবেস ইনডেক্স কীভাবে কাজ করে
+explainer | ক্যাশ (cache) কী এবং কেন কম্পিউটার দ্রুত হয়
+explainer | API কী: রেস্টুরেন্টের ওয়েটারের উদাহরণ
+timeline3d | বাংলাদেশের একটি ঐতিহাসিক সেতুর গল্প

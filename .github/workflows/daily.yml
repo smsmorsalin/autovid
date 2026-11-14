@@ -1,0 +1,83 @@
+name: Daily video
+
+on:
+  schedule:
+    - cron: "0 4 * * *"          # 04:00 UTC = 10:00 Bangladesh time. Edit to change the time.
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Optional topic override (leave empty to take the next line of topics.txt)"
+        required: false
+      style:
+        description: "Style for the override topic"
+        type: choice
+        options: [explainer, timeline3d]
+        default: explainer
+
+permissions:
+  contents: write                # to commit state/done.json
+
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System packages (ffmpeg + Bengali fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-ui-core fonts-dejavu-core
+          fc-list :lang=bn family | sort -u | head
+
+      - name: Python packages + Chromium
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Make the video
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          TOPIC: ${{ inputs.topic }}
+          STYLE: ${{ inputs.style }}
+        run: |
+          if [ -n "$TOPIC" ]; then
+            python -m autovid make --topic "$TOPIC" --style "$STYLE" --out out/manual --notify
+          else
+            python -m autovid next
+          fi
+
+      - name: Stage the result
+        run: |
+          mkdir -p stage
+          D=$(ls -d out/*/ | head -1)
+          cp "$D"final.mp4 "$D"meta.json "$D"script.json stage/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: stage
+          retention-days: 30
+
+      - name: Save progress (state/done.json)
+        run: |
+          git config user.name "autovid-bot"
+          git config user.email "autovid-bot@users.noreply.github.com"
+          git add state/done.json || true
+          git diff --cached --quiet || (git commit -m "autovid: mark topic done" && git push)

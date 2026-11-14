@@ -1,0 +1,5 @@
+# Offline test config: no API keys, no network. Placeholder pictures + silent narration.
+extends: config.yaml
+images: {provider: placeholder}
+tts: {provider: silent}
+video: {width: 720, height: 1280}

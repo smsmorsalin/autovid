@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------
+# autovid configuration. Secrets (API keys) are NOT stored here:
+# they come from environment variables / GitHub Actions secrets.
+# ---------------------------------------------------------------
+language: bn
+
+series:
+  name: "জানা অজানা"          # shown in the header of explainer videos. Change to your channel name
+  handle: "@yourchannel"       # shown on the end card
+  end_line1: "এটাই হলো"        # end card: "<end_line1> <topic_short> <end_line2>"
+  end_line2: "-এর গল্প"
+  cta: "ফলো করুন"
+  episode_start: 1             # explainer header shows an episode number
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  scene_padding: 0.35          # seconds of silence after each narrated scene
+  end_card_seconds: 2.5
+  music: ""                    # optional path to a royalty-free .mp3 (mixed quietly under the voice)
+  music_volume: 0.08
+
+target_seconds: 75             # rough length the script writer aims for
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-5-5
+  research: true               # use web search to gather sourced facts before writing
+  web_search_tool: web_search_20250305
+  max_search_uses: 6
+
+images:
+  provider: fal                # fal (Flux) | openai | placeholder (offline test, no API key)
+  fal_model: fal-ai/flux/dev
+  openai_model: gpt-image-1
+  label_ai_visuals: true       # show the "প্রতীকী দৃশ্য" (representative scene) tag on AI-made visuals
+  label_text: "প্রতীকী দৃশ্য"
+  style_suffix:
+    explainer: "flat vector illustration, dark navy night palette with warm orange accents, soft lamp lighting, clean shapes, no text, no letters, no logos, vertical 9:16 composition"
+    timeline3d: "photorealistic 3D render, cinematic natural lighting, soft clouds, detailed, vertical 9:16 composition, no text, no letters, no logos, no real people's faces"
+
+i2v:                           # optional image-to-video for the 3D-look style
+  provider: none               # none (slow zoom/pan) | fal_kling
+  fal_model: fal-ai/kling-video/v2.1/standard/image-to-video
+  seconds: 5
+
+tts:
+  provider: edge               # edge (free, Bengali voices) | elevenlabs | silent (offline test)
+  edge_voice: bn-BD-NabanitaNeural     # alternatives: bn-BD-PradeepNeural, bn-IN-TanishaaNeural
+  edge_rate: "+0%"
+  elevenlabs_voice_id: ""
+  elevenlabs_model: eleven_multilingual_v2
+
+publish:
+  require_approval: true       # true: render + send to Telegram, publish later via the Publish workflow
+  youtube: true
+  facebook: false
+  instagram: false
+  privacy: public              # public | unlisted | private
+  mark_synthetic: true         # tell YouTube the video contains AI-generated content
+  extra_hashtags: ["#Shorts"]
