@@ -42,73 +42,109 @@ def _anthropic(cfg, system, user, search, max_tokens):
 
 
 _GEM = "https://generativelanguage.googleapis.com/v1beta"
+NO_SEARCH_NOTE = "[NO WEB SEARCH: these facts come from the AI's own memory and are NOT verified]"
 
 
-def _gemini_pick_model(key):
-    """Ask Google which models this key can use; pick the newest plain 'flash' that can generateContent."""
+def _gemini_candidates(key):
+    """Models this key can call, newest plain Flash first, then Flash-Lite."""
     r = requests.get(f"{_GEM}/models", params={"key": key, "pageSize": 200}, timeout=60)
     r.raise_for_status()
-    best, best_ver = None, (-1,)
+    found = []
     for m in r.json().get("models", []):
         name = m["name"].split("/")[-1]
-        if "flash" not in name or any(x in name for x in ("lite", "image", "tts", "live", "audio", "thinking", "embed", "native")):
+        if "flash" not in name or any(x in name for x in ("image", "tts", "live", "audio", "thinking", "embed", "native")):
             continue
         if "generateContent" not in m.get("supportedGenerationMethods", []):
             continue
         ver = tuple(int(x) for x in re.findall(r"\d+", name)) or (0,)
-        if ver > best_ver:
-            best, best_ver = name, ver
-    if not best:
-        raise RuntimeError("no usable Gemini flash model found for this key")
-    return best
+        found.append(("lite" in name, tuple(-v for v in ver), name))
+    return [n for _, _, n in sorted(found)]
+
+
+def _hard_quota(text):
+    t = text.lower()
+    return "limit: 0" in t or "perday" in t or "per day" in t or "billing" in t
+
+
+def _retry_delay(text):
+    m = re.search(r'retrydelay"?\s*[:=]\s*"?(\d+)', text.lower())
+    return int(m.group(1)) if m else None
+
+
+def _gem_post(model, body, key):
+    """One call. Short per-minute rate limits are waited out; hard quota errors return at once."""
+    r = None
+    for attempt in range(3):
+        r = requests.post(f"{_GEM}/models/{model}:generateContent", params={"key": key}, json=body, timeout=600)
+        if r.status_code in (500, 503):
+            time.sleep(15 * (attempt + 1))
+            continue
+        if r.status_code == 429:
+            wait = _retry_delay(r.text) or 30
+            if _hard_quota(r.text) or wait > 90:
+                return r
+            log(f"Gemini rate limit on {model}, waiting {wait + 2}s")
+            time.sleep(wait + 2)
+            continue
+        return r
+    return r
 
 
 def _gemini(cfg, system, user, search, max_tokens):
     """Google AI Studio (free key). Research uses Google Search grounding; the script call asks for JSON.
-    If the configured model is retired (404), the newest available Flash model is picked automatically."""
+    Falls back: without search -> other available Flash models. Never loops on a hard quota error."""
     key = env("GEMINI_API_KEY")
-    model = cfg["llm"]["model"]
-    body = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
-    }
-    if search:
-        body["tools"] = [{"google_search": {}}]
-    else:
-        body["generationConfig"]["responseMimeType"] = "application/json"
-    switched = False
-    for attempt in range(6):
-        if model == "auto":
-            model = _gemini_pick_model(key)
-            log("Gemini model:", model)
-        r = requests.post(f"{_GEM}/models/{model}:generateContent", params={"key": key}, json=body, timeout=600)
-        if r.status_code in (429, 500, 503):          # free tier: rate limited / busy -> wait and retry
-            wait = 20 * (attempt + 1)
-            log(f"Gemini {r.status_code}, retrying in {wait}s")
-            time.sleep(wait)
-            continue
-        if r.status_code == 404 and not switched:      # model retired / unavailable -> auto-pick a current one
-            log(f"Gemini model {model} unavailable, looking for a current Flash model")
-            model, switched = _gemini_pick_model(key), True
-            log("Gemini model:", model)
-            cfg["llm"]["model"] = model                # remember for the following calls in this run
-            continue
-        break
-    if r.status_code >= 400:
-        raise RuntimeError(f"Gemini API error {r.status_code}: {r.text[:500]}")
-    data = r.json()
-    cands = data.get("candidates") or []
-    if not cands:
-        raise RuntimeError("Gemini returned no candidates: " + str(data)[:400])
-    parts = cands[0].get("content", {}).get("parts", [])
-    text = "".join(p.get("text", "") for p in parts)
-    if search:  # append the grounding source links so they end up in the description
-        chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
-        links = [c["web"]["uri"] for c in chunks if c.get("web", {}).get("uri")]
-        if links:
-            text += "\n\nSOURCE LINKS found by search:\n" + "\n".join(dict.fromkeys(links))
-    return text
+    models = [cfg["llm"]["model"]] if cfg["llm"]["model"] != "auto" else []
+    discovered = not models
+    if discovered:
+        models = _gemini_candidates(key)
+    errors, i = [], 0
+    while i < len(models):
+        model = models[i]
+        for use_search in ([True, False] if search and not cfg["llm"].get("_no_search") else [False]):
+            body = {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": user}]}],
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
+            }
+            if use_search:
+                body["tools"] = [{"google_search": {}}]
+            elif not search:
+                body["generationConfig"]["responseMimeType"] = "application/json"
+            r = _gem_post(model, body, key)
+            if r.status_code == 200:
+                cands = r.json().get("candidates") or []
+                if not cands:
+                    errors.append(f"{model}: empty answer")
+                    continue
+                parts = cands[0].get("content", {}).get("parts", [])
+                text = "".join(p.get("text", "") for p in parts)
+                if search and use_search:
+                    chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
+                    links = [c["web"]["uri"] for c in chunks if c.get("web", {}).get("uri")]
+                    if links:
+                        text += "\n\nSOURCE LINKS found by search:\n" + "\n".join(dict.fromkeys(links))
+                if search and not use_search:
+                    cfg["llm"]["_no_search"] = True        # search has no quota: skip it from now on
+                    text = NO_SEARCH_NOTE + "\n" + text
+                    log("WARNING: Google Search quota unavailable; facts are NOT web-verified")
+                if cfg["llm"]["model"] != model:
+                    log("Gemini model in use:", model)
+                    cfg["llm"]["model"] = model
+                return text
+            errors.append(f"{model}{' +search' if use_search else ''}: {r.status_code} {r.text[:160]}")
+            log(f"Gemini {model}{' with search' if use_search else ''} -> {r.status_code}")
+            if r.status_code not in (404, 429):
+                raise RuntimeError(f"Gemini API error {r.status_code}: {r.text[:500]}")
+            if r.status_code == 404:
+                break                                    # model gone: next model, no point retrying without search
+        i += 1
+        if i == len(models) and not discovered:          # configured model failed: look at what the key can use
+            discovered = True
+            models += [m for m in _gemini_candidates(key)[:4] if m not in models]
+    raise RuntimeError(
+        "All Gemini models failed. Open https://aistudio.google.com/rate-limit to see which models have free "
+        "quota for your key, or create a new key in a new project.\n" + "\n".join(errors[-6:]))
 
 
 def _llm(cfg, system, user, search=False, max_tokens=8000):
@@ -250,5 +286,6 @@ def generate(topic, style, cfg):
     facts = research(topic, cfg)
     script = write_script(topic, facts, style, cfg)
     script["facts"] = facts
+    script["facts_verified"] = not facts.startswith("[NO WEB SEARCH")
     script["topic"] = topic
     return script
