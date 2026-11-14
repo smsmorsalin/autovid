@@ -36,11 +36,12 @@ images:
   cloudflare:                  # free daily allowance. Needs CF_ACCOUNT_ID + CF_API_TOKEN
     model: "@cf/black-forest-labs/flux-1-schnell"
     steps: 6
+    use_seed: false            # flux-1-schnell rejects 'seed'; set true only for models that accept it
     # width: 768             # set both if the chosen model supports portrait sizes
     # height: 1344
-  pollinations:                # no key; anonymous use is rate limited (about 1 image / 15 s)
+  pollinations:                # no key; anonymous use is rate limited (about 1 image / 45 s per IP). Slow backup only
     model: flux
-    min_interval: 16
+    min_interval: 46
   fal_model: fal-ai/flux/dev
   openai_model: gpt-image-1
   label_ai_visuals: true       # show the "প্রতীকী দৃশ্য" (representative scene) tag on AI-made visuals
