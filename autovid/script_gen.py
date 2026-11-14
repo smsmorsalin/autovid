@@ -41,10 +41,33 @@ def _anthropic(cfg, system, user, search, max_tokens):
     return "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
 
 
+_GEM = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def _gemini_pick_model(key):
+    """Ask Google which models this key can use; pick the newest plain 'flash' that can generateContent."""
+    r = requests.get(f"{_GEM}/models", params={"key": key, "pageSize": 200}, timeout=60)
+    r.raise_for_status()
+    best, best_ver = None, (-1,)
+    for m in r.json().get("models", []):
+        name = m["name"].split("/")[-1]
+        if "flash" not in name or any(x in name for x in ("lite", "image", "tts", "live", "audio", "thinking", "embed", "native")):
+            continue
+        if "generateContent" not in m.get("supportedGenerationMethods", []):
+            continue
+        ver = tuple(int(x) for x in re.findall(r"\d+", name)) or (0,)
+        if ver > best_ver:
+            best, best_ver = name, ver
+    if not best:
+        raise RuntimeError("no usable Gemini flash model found for this key")
+    return best
+
+
 def _gemini(cfg, system, user, search, max_tokens):
-    """Google AI Studio (free key). Research uses Google Search grounding; the script call asks for JSON."""
+    """Google AI Studio (free key). Research uses Google Search grounding; the script call asks for JSON.
+    If the configured model is retired (404), the newest available Flash model is picked automatically."""
+    key = env("GEMINI_API_KEY")
     model = cfg["llm"]["model"]
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -54,13 +77,22 @@ def _gemini(cfg, system, user, search, max_tokens):
         body["tools"] = [{"google_search": {}}]
     else:
         body["generationConfig"]["responseMimeType"] = "application/json"
-    key = env("GEMINI_API_KEY")
-    for attempt in range(5):
-        r = requests.post(url, params={"key": key}, json=body, timeout=600)
+    switched = False
+    for attempt in range(6):
+        if model == "auto":
+            model = _gemini_pick_model(key)
+            log("Gemini model:", model)
+        r = requests.post(f"{_GEM}/models/{model}:generateContent", params={"key": key}, json=body, timeout=600)
         if r.status_code in (429, 500, 503):          # free tier: rate limited / busy -> wait and retry
             wait = 20 * (attempt + 1)
             log(f"Gemini {r.status_code}, retrying in {wait}s")
             time.sleep(wait)
+            continue
+        if r.status_code == 404 and not switched:      # model retired / unavailable -> auto-pick a current one
+            log(f"Gemini model {model} unavailable, looking for a current Flash model")
+            model, switched = _gemini_pick_model(key), True
+            log("Gemini model:", model)
+            cfg["llm"]["model"] = model                # remember for the following calls in this run
             continue
         break
     if r.status_code >= 400:
