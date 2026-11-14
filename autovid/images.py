@@ -4,6 +4,7 @@ import hashlib
 import io
 import pathlib
 import random
+import re
 import time
 import urllib.parse
 
@@ -126,19 +127,33 @@ def openai_image(prompt, out, cfg):
 
 # ---------------------------------------------------------------- free providers
 def cloudflare_image(prompt, out, cfg, seed):
-    """Cloudflare Workers AI (free daily allowance). Needs CF_ACCOUNT_ID + CF_API_TOKEN."""
+    """Cloudflare Workers AI (free daily allowance). Needs CF_ACCOUNT_ID + CF_API_TOKEN.
+    Settings the chosen model does not accept are dropped automatically and the call is retried."""
     c = cfg["images"].get("cloudflare", {})
     acct, tok = env("CF_ACCOUNT_ID"), env("CF_API_TOKEN")
     model = c.get("model", "@cf/black-forest-labs/flux-1-schnell")
     url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}"
-    payload = {"prompt": prompt[:2000], "steps": c.get("steps", 6), "seed": seed}
+    payload = {"prompt": prompt[:2000]}
+    if c.get("steps"):
+        payload["steps"] = c["steps"]
     if c.get("width") and c.get("height"):
         payload.update(width=c["width"], height=c["height"])
-    for attempt in range(3):
+    if c.get("use_seed"):
+        payload["seed"] = seed
+    r = None
+    for attempt in range(8):
         r = requests.post(url, headers={"Authorization": "Bearer " + tok}, json=payload, timeout=300)
         if r.status_code == 429:
             time.sleep(15 * (attempt + 1))
             continue
+        if r.status_code == 400:
+            bad = re.findall(r"properties '/(\w+)'", r.text)
+            bad = [k for k in bad if k in payload and k != "prompt"]
+            if bad:
+                for k in bad:
+                    log(f"Cloudflare model does not accept '{k}', removing it")
+                    payload.pop(k)
+                continue
         break
     if r.status_code >= 400:
         raise RuntimeError(f"Cloudflare image error {r.status_code}: {r.text[:300]}")
@@ -158,16 +173,24 @@ _last_pollinations = [0.0]
 
 
 def pollinations_image(prompt, out, cfg, seed):
-    """Pollinations legacy endpoint: no key. Anonymous use is rate limited (about 1 request / 15 s)."""
+    """Pollinations legacy endpoint: no key. The free limit is about 1 image / 45 s per IP (it changes), so
+    the code waits as long as the server says. Slow: use as a backup only."""
     c = cfg["images"].get("pollinations", {})
-    wait = c.get("min_interval", 16) - (time.time() - _last_pollinations[0])
-    if wait > 0:
-        time.sleep(wait)
     q = urllib.parse.urlencode({"width": 1080, "height": 1920, "model": c.get("model", "flux"),
                                 "seed": seed, "nologo": "true", "private": "true"})
     url = "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt[:900]) + "?" + q
-    _last_pollinations[0] = time.time()
-    r = requests.get(url, timeout=300)
+    r = None
+    for attempt in range(4):
+        wait = c.get("min_interval", 46) - (time.time() - _last_pollinations[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_pollinations[0] = time.time()
+        r = requests.get(url, timeout=300)
+        if r.status_code in (402, 429):
+            m = re.search(r"[Rr]etry after (\d+)", r.text)
+            time.sleep((int(m.group(1)) if m else 45) + 2)
+            continue
+        break
     if r.status_code >= 400 or not r.headers.get("content-type", "").startswith("image/"):
         raise RuntimeError(f"Pollinations error {r.status_code}: {r.text[:200]}")
     pathlib.Path(out).write_bytes(r.content)
