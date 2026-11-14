@@ -25,7 +25,7 @@ target_seconds: 75             # rough length the script writer aims for
 
 llm:
   provider: gemini             # gemini (free key from aistudio.google.com) | anthropic (paid)
-  model: gemini-2.5-flash      # check the current free models in Google AI Studio and change here if needed
+  model: gemini-3.8-flash      # if Google retires it, the newest Flash model is picked automatically. 'auto' also works
   research: true               # use Google Search grounding to gather sourced facts before writing
   # only for provider: anthropic
   web_search_tool: web_search_20250305
