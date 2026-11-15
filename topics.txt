@@ -1,7 +1,41 @@
-# One topic per line, format:  style | topic
 # style = explainer (concept taught with an analogy + UI cards) or timeline3d (dated story with 3D-look scenes)
 # The scheduler takes the first line not yet produced (tracked in state/done.json).
-explainer | ডেটাবেস ইনডেক্স কীভাবে কাজ করে
-explainer | ক্যাশ (cache) কী এবং কেন কম্পিউটার দ্রুত হয়
+# Format: style | topic     (explainer = concept with analogy, timeline3d = dated history story)
+
+# Format: style | topic     (explainer = concept with analogy, timeline3d = dated history story)
+# The scheduler makes the first line not yet produced. Add new lines at the bottom.
+
+explainer | ক্যাশ (cache) কী এবং কেন কম্পিউটার দ্রুত হয়: বইয়ের টেবিলের উদাহরণ
+timeline3d | মোবাইল ফোনের ইতিহাস: টেলিফোন থেকে স্মার্টফোন
 explainer | API কী: রেস্টুরেন্টের ওয়েটারের উদাহরণ
-timeline3d | বাংলাদেশের একটি ঐতিহাসিক সেতুর গল্প
+timeline3d | ইন্টারনেটের ইতিহাস: আরপানেট থেকে আজ
+explainer | QR কোড কীভাবে কাজ করে
+timeline3d | বিমানের ইতিহাস: রাইট ভাইদের প্রথম উড়ান থেকে আজ
+explainer | ডেটাবেস ইনডেক্স কীভাবে কাজ করে: বইয়ের সূচিপত্রের উদাহরণ
+timeline3d | ছাপাখানার ইতিহাস: গুটেনবার্গ থেকে ডিজিটাল যুগ
+explainer | ইন্টারনেট কীভাবে কাজ করে: ডাকঘর ও চিঠির উদাহরণ
+timeline3d | বৈদ্যুতিক বাতির ইতিহাস
+explainer | পাসওয়ার্ড হ্যাশ কী এবং কেন পাসওয়ার্ড সরাসরি জমানো হয় না
+timeline3d | চাঁদে প্রথম মানুষ: অ্যাপোলো ১১-এর গল্প
+explainer | GPS কীভাবে আপনার অবস্থান বের করে
+timeline3d | রেলগাড়ির ইতিহাস: বাষ্পীয় ইঞ্জিন থেকে আজ
+explainer | ওয়াই-ফাই কীভাবে কাজ করে
+timeline3d | কম্পিউটারের ইতিহাস: প্রথম যান্ত্রিক হিসাব থেকে ল্যাপটপ
+explainer | ব্লুটুথ কীভাবে কাজ করে: দুটি ফোনের কথোপকথনের উদাহরণ
+timeline3d | ক্যামেরার ইতিহাস: প্রথম ছবি থেকে স্মার্টফোন ক্যামেরা
+explainer | মেঘ কীভাবে তৈরি হয় এবং বৃষ্টি কেন হয়
+timeline3d | টেলিভিশনের ইতিহাস: সাদা-কালো পর্দা থেকে স্মার্ট টিভি
+explainer | বজ্রপাত কেন হয়
+timeline3d | ঘড়ির ইতিহাস: সূর্যঘড়ি থেকে স্মার্টওয়াচ
+explainer | ভাইরাস ও ব্যাকটেরিয়ার পার্থক্য কী
+timeline3d | সাইকেলের ইতিহাস: কাঠের ঠেলাগাড়ি থেকে আধুনিক সাইকেল
+explainer | কৃত্রিম বুদ্ধিমত্তা (AI) কীভাবে শেখে: ছাত্রের উদাহরণ
+timeline3d | রেডিওর ইতিহাস: তারহীন বার্তা থেকে এফএম
+explainer | এনক্রিপশন কী: তালা ও চাবির উদাহরণ
+timeline3d | পেনিসিলিন আবিষ্কারের গল্প
+explainer | ব্যাটারি কীভাবে কাজ করে
+timeline3d | মহাকাশ অভিযানের ইতিহাস: স্পুটনিক থেকে আজ
+explainer | ক্লাউড কম্পিউটিং কী: ভাড়া বাসার উদাহরণ
+
+# ---- local topics (check every date and number before posting) ----
+# timeline3d | কালুরঘাট সেতুর ইতিহাস
