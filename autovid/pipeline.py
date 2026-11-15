@@ -63,12 +63,16 @@ def make_video(cfg, out_dir, topic=None, style="explainer", script_path=None, ep
     final = out_dir / "final.mp4"
     render_video(script, assets, cfg, work, episode, final)
 
-    tags = list(dict.fromkeys(script.get("hashtags", []) + cfg["publish"].get("extra_hashtags", [])))
-    src = "\n".join(f"- {s.get('title', '')} {s.get('url', '')}".strip() for s in script.get("sources", []))
-    desc = script.get("description", "") + "\n\n" + " ".join(tags)
+    md = script_gen.make_metadata(script, cfg)
+    ex = [h for h in cfg["publish"].get("extra_hashtags", []) if h.lower() not in [x.lower() for x in md["hashtags"]]]
+    parts = [md["description"], " ".join(md["hashtags"] + ex)]
+    note = cfg.get("metadata", {}).get("ai_note", "")
+    if note:
+        parts.append(note)
+    src = "\n".join(f"- {s.get('title', '')} {s.get('url', '')}".strip() for s in script.get("sources", []) if s.get("url"))
     if src:
-        desc += "\n\nSources:\n" + src
-    meta = {"title": script["title"], "description": desc, "tags": [t.lstrip("#") for t in tags],
+        parts.append("Sources:\n" + src)
+    meta = {"title": md["title"], "description": "\n\n".join(x for x in parts if x), "tags": md["tags"],
             "style": style, "topic": script.get("topic", "")}
     write_json(out_dir / "meta.json", meta)
     log("done ->", final)
