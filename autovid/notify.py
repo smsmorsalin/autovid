@@ -34,4 +34,8 @@ def telegram(out_dir, text_extra=""):
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
                       data={"chat_id": chat, "text": caption + "\n(video too large for Telegram: download the artifact)"},
                       timeout=60)
+    # second message: title + description + hashtags + sources, ready to copy-paste when posting by hand
+    text = f"TITLE:\n{meta['title']}\n\nDESCRIPTION:\n{meta['description']}"
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                  data={"chat_id": chat, "text": text[:4000]}, timeout=60)
     log("Telegram notified")
