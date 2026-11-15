@@ -4,7 +4,7 @@ import json
 import pathlib
 import re
 
-from . import notify, pipeline, publish
+from . import notify, publish
 from .util import ROOT, load_config, log
 
 STATE = ROOT / "state" / "done.json"
@@ -68,6 +68,7 @@ def main():
     cfg = load_config(a.config)
 
     if a.cmd == "make":
+        from . import pipeline   # heavy imports (Pillow, numpy, Playwright) only when making a video
         ep = a.episode or cfg["series"].get("episode_start", 1)
         pipeline.make_video(cfg, a.out, a.topic, a.style, a.script, ep)
         if a.notify:
@@ -78,6 +79,7 @@ def main():
         if not topic:
             log("no pending topics in", a.topics)
             return
+        from . import pipeline
         ep = cfg["series"].get("episode_start", 1) + len(_done())
         out = pathlib.Path(a.out_root) / f"{datetime.date.today().isoformat()}-{_slug(topic)}"
         pipeline.make_video(cfg, out, topic, style, None, ep)
