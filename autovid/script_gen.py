@@ -71,11 +71,32 @@ def _retry_delay(text):
     return int(m.group(1)) if m else None
 
 
+class _Fail:
+    """Stand-in response for network errors / timeouts so the caller can fall back."""
+    def __init__(self, text):
+        self.status_code, self.text = 599, text
+
+    def json(self):
+        return {}
+
+
 def _gem_post(model, body, key):
-    """One call. Short per-minute rate limits are waited out; hard quota errors return at once."""
+    """One call. Short per-minute rate limits are waited out; hard quota errors and timeouts return at once
+    (the caller then tries the next option). Rejected optional settings (thinking) are dropped and retried."""
+    timeout = (20, 180)
     r = None
-    for attempt in range(3):
-        r = requests.post(f"{_GEM}/models/{model}:generateContent", params={"key": key}, json=body, timeout=600)
+    for attempt in range(4):
+        try:
+            r = requests.post(f"{_GEM}/models/{model}:generateContent", params={"key": key}, json=body, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            log(f"Gemini {model}: {type(e).__name__} (no answer within {timeout[1]}s)")
+            if attempt == 0:
+                continue                                  # one more try, then give up on this model
+            return _Fail(f"{type(e).__name__}: {str(e)[:150]}")
+        if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in body["generationConfig"]:
+            log("model rejects thinkingConfig, removing it")
+            body["generationConfig"].pop("thinkingConfig")
+            continue
         if r.status_code in (500, 503):
             time.sleep(15 * (attempt + 1))
             continue
@@ -105,7 +126,8 @@ def _gemini(cfg, system, user, search, max_tokens):
             body = {
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7,
+                                     "thinkingConfig": {"thinkingBudget": 0}},
             }
             if use_search:
                 body["tools"] = [{"google_search": {}}]
@@ -134,7 +156,7 @@ def _gemini(cfg, system, user, search, max_tokens):
                 return text
             errors.append(f"{model}{' +search' if use_search else ''}: {r.status_code} {r.text[:160]}")
             log(f"Gemini {model}{' with search' if use_search else ''} -> {r.status_code}")
-            if r.status_code not in (404, 429):
+            if r.status_code not in (404, 429, 599):
                 raise RuntimeError(f"Gemini API error {r.status_code}: {r.text[:500]}")
             if r.status_code == 404:
                 break                                    # model gone: next model, no point retrying without search
