@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install requests pyyaml
+      - run: pip install -r requirements.txt
 
       - name: Download the approved video
         env:
