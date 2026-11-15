@@ -311,3 +311,82 @@ def generate(topic, style, cfg):
     script["facts_verified"] = not facts.startswith("[NO WEB SEARCH")
     script["topic"] = topic
     return script
+
+
+# ---------------------------------------------------------------- YouTube metadata (title / description / tags)
+META_SYSTEM = (
+    "You are a YouTube Shorts editor for a Bengali educational channel. You write accurate, honest metadata "
+    "that helps the right viewers find the video. No clickbait that the video does not deliver, no false claims, "
+    "no ALL-CAPS shouting, no emoji spam. Reply with a single JSON object and nothing else."
+)
+
+
+def _clean_tag(t):
+    t = re.sub(r"\s+", " ", str(t).replace("#", "")).strip(" ,.;:")
+    return t
+
+
+def sanitize_metadata(obj, script, cfg):
+    """Enforce YouTube limits whatever the model returned."""
+    mcfg = cfg.get("metadata", {})
+    tmax = int(mcfg.get("title_max", 70))
+    title = re.sub(r"\s+", " ", str(obj.get("title") or script.get("title") or "")).strip().strip("\"'“”")
+    if len(title) > tmax:
+        cut = title[:tmax].rsplit(" ", 1)[0].rstrip(" ,:;-")
+        title = cut if len(cut) >= tmax // 2 else title[:tmax]
+    tags, seen, total = [], set(), 0
+    for t in obj.get("tags") or []:
+        t = _clean_tag(t)
+        k = t.lower()
+        if not t or k in seen or len(t) > 40:
+            continue
+        cost = len(t) + (3 if " " in t else 1)           # YouTube counts quotes + comma for multi-word tags
+        if total + cost > 450 or len(tags) >= 15:
+            break
+        seen.add(k)
+        tags.append(t)
+        total += cost
+    hashtags = []
+    for h in obj.get("hashtags") or []:
+        h = "#" + re.sub(r"[\s#]+", "", str(h))
+        if len(h) > 1 and h.lower() not in [x.lower() for x in hashtags]:
+            hashtags.append(h)
+    hashtags = hashtags[:5]
+    desc = str(obj.get("description") or script.get("description") or "").strip()[:3000]
+    return {"title": title, "description": desc, "tags": tags, "hashtags": hashtags}
+
+
+def make_metadata(script, cfg):
+    """Ask the LLM for title / description / tags / hashtags based on the FINAL script.
+    Any failure falls back to what the script writer produced, so publishing is never blocked."""
+    fallback = sanitize_metadata({
+        "title": script.get("title", ""), "description": script.get("description", ""),
+        "tags": [h.lstrip("#") for h in script.get("hashtags", [])] + [script.get("topic_short", "")],
+        "hashtags": script.get("hashtags", [])}, script, cfg)
+    if not cfg.get("metadata", {}).get("auto", True):
+        return fallback
+    narration = " ".join(sc["narration"] for sc in script["scenes"])
+    user = (
+        f"TOPIC: {script.get('topic', '')}\nSTYLE: {script.get('style', '')}\n"
+        f"VIDEO NARRATION (Bengali):\n{narration}\n\n"
+        "Write metadata for this vertical short video.\n"
+        f"- title: Bengali, at most {cfg.get('metadata', {}).get('title_max', 70)} characters, specific, starts with the "
+        "strongest keyword or a curiosity hook that the video really answers. Do not repeat the same words twice.\n"
+        "- description: Bengali, 2-4 short lines. First line = what the viewer will learn (contains the main keywords). "
+        "No links, no hashtags inside it.\n"
+        "- tags: 10-14 search tags mixing Bengali and English (e.g. the English term people actually search), most "
+        "important first, each under 30 characters, no # sign.\n"
+        "- hashtags: 3-4 short hashtags (Bengali or English) including the main topic.\n"
+        'JSON: {"title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."]}'
+    )
+    try:
+        log("writing YouTube title/tags...")
+        text = _llm(cfg, META_SYSTEM, user, search=False, max_tokens=1500)
+        m = re.search(r"\{.*\}", text, re.S)
+        meta = sanitize_metadata(json.loads(m.group(0)), script, cfg)
+        if not meta["title"] or len(meta["tags"]) < 3:
+            raise ValueError("metadata too thin")
+        return meta
+    except (Exception, SystemExit) as e:
+        log("metadata step failed, using the script's own title/hashtags:", str(e)[:150])
+        return fallback
