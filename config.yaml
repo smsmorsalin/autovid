@@ -63,6 +63,11 @@ tts:
   elevenlabs_voice_id: ""
   elevenlabs_model: eleven_multilingual_v2
 
+metadata:
+  auto: true                   # the AI writes the YouTube title, description, tags and hashtags
+  title_max: 70
+  ai_note: "এই ভিডিওর ছবি এআই দিয়ে তৈরি।"   # added to every description ('images are AI-made'); set "" to remove
+
 publish:
   require_approval: true       # true: render + send to Telegram, publish later via the Publish workflow
   youtube: true
