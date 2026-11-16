@@ -91,3 +91,5 @@ The Instagram API only accepts a **public https URL** of the video. Upload `fina
 * The YouTube / Facebook / Instagram uploaders call live APIs and were **not** run against real accounts when this was written. Test with a private upload first.
 * The research step uses Anthropic's server-side web search tool; the tool version name is in `config.yaml` (`llm.web_search_tool`) in case it changes.
 * Placeholder visuals are only for offline testing.
+
+## more information
