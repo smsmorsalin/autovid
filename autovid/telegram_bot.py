@@ -189,16 +189,18 @@ def _handle_message(message, token, cfg, state):
         return
 
     text = (message.get("text") or "").strip()
-    lowered = text.lower()
+    command, separator, argument = text.partition(" ")
+    command = command.casefold().split("@", 1)[0]
+    argument = argument.strip()
 
-    if lowered in ("/start", "/help"):
+    if command in ("/start", "start", "/help", "help"):
         _send(token, chat_id, HELP)
         return
-    if lowered in ("/remaining", "/queue"):
+    if command in ("/remaining", "/remaning", "remaining", "remaning", "/queue", "queue"):
         _send(token, chat_id, f"বাকি স্ক্রিপ্ট: {pending_script_count()}")
         return
-    if lowered.startswith("/add"):
-        value = text.partition(" ")[2].strip()
+    if command in ("/add", "add"):
+        value = argument if separator else ""
         limit = cfg.get("telegram", {}).get("max_script_length", 500)
         if not value:
             _send(token, chat_id, "ব্যবহার: /add <বাংলা স্ক্রিপ্ট বা টপিক>")
@@ -224,7 +226,7 @@ def _handle_message(message, token, cfg, state):
         _publish(token, chat_id, message, pending, file_id, cfg, state, unique_id)
         return
 
-    if lowered not in ("upload", "/upload"):
+    if command not in ("upload", "/upload"):
         return
 
     # Be forgiving: a plain "upload" works when there is exactly one waiting video.

@@ -198,8 +198,10 @@ Only messages from `TELEGRAM_CHAT_ID` are accepted.
 /help
 ```
 
-`/add` appends to the end of `scripts.json`. The remaining count is also sent
-with every generated video.
+`/add` appends to the end of `scripts.json`. The bot also accepts these commands
+without the leading slash, accepts `/command@botname` syntax, and treats the
+common `/remaning` spelling as an alias for `/remaining`. The remaining count is
+also sent with every generated video.
 
 ### Duplicate upload protection
 
