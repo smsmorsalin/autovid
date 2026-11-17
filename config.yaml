@@ -79,7 +79,7 @@ publish:
   youtube: true
   facebook: false        # set true after FB_PAGE_ID / FB_PAGE_TOKEN are configured
   instagram: false
-  privacy: private
+  privacy: public
   mark_synthetic: true
   extra_hashtags: ["#Shorts"]
 
