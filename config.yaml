@@ -1,78 +1,87 @@
-# ---------------------------------------------------------------
-# autovid configuration. Secrets (API keys) are NOT stored here:
-# they come from environment variables / GitHub Actions secrets.
-# ---------------------------------------------------------------
 language: bn
 
 series:
-  name: "জানা অজানা"          # shown in the header of explainer videos. Change to your channel name
-  handle: "@yourchannel"       # shown on the end card
-  end_line1: "এটাই হলো"        # end card: "<end_line1> <topic_short> <end_line2>"
-  end_line2: "-এর গল্প"
-  cta: "ফলো করুন"
-  episode_start: 1             # explainer header shows an episode number
+  name: "S. M. S. Morsalin."
+  handle: "@smsmorsalin9116"
+  end_line1: "Video credits"
+  end_line2: "-Thank you for watching"
+  cta: "Follow the channel"
+  episode_start: 1
 
 video:
   width: 1080
   height: 1920
   fps: 30
-  scene_padding: 0.35          # seconds of silence after each narrated scene
+  scene_padding: 0.35
   end_card_seconds: 2.5
-  music: ""                    # optional path to a royalty-free .mp3 (mixed quietly under the voice)
+  music: ""
   music_volume: 0.08
 
-target_seconds: 75             # rough length the script writer aims for
+target_seconds: 75
 
 llm:
-  provider: gemini             # gemini (free key from aistudio.google.com) | anthropic (paid)
-  model: gemini-3.8-flash      # if Google retires it, the newest Flash model is picked automatically. 'auto' also works
-  research: true               # use Google Search grounding to gather sourced facts before writing
-  # only for provider: anthropic
+  provider: gemini
+  model: gemini-3.8-flash
+  research: true
   web_search_tool: web_search_20250305
   max_search_uses: 6
 
 images:
-  provider: [cloudflare, pollinations]   # tried in order. Others: fal, openai (paid), placeholder (offline test)
-  cloudflare:                  # free daily allowance. Needs CF_ACCOUNT_ID + CF_API_TOKEN
+  provider: [cloudflare, pollinations]
+  cloudflare:
     model: "@cf/black-forest-labs/flux-1-schnell"
     steps: 6
-    use_seed: false            # flux-1-schnell rejects 'seed'; set true only for models that accept it
-    # width: 768             # set both if the chosen model supports portrait sizes
-    # height: 1344
-  pollinations:                # no key; anonymous use is rate limited (about 1 image / 45 s per IP). Slow backup only
+    use_seed: false
+  pollinations:
     model: flux
     min_interval: 46
   fal_model: fal-ai/flux/dev
   openai_model: gpt-image-1
-  label_ai_visuals: true       # show the "প্রতীকী দৃশ্য" (representative scene) tag on AI-made visuals
+  label_ai_visuals: true
   label_text: "প্রতীকী দৃশ্য"
   style_suffix:
     explainer: "flat vector illustration, dark navy night palette with warm orange accents, soft lamp lighting, clean shapes, no text, no letters, no logos, vertical 9:16 composition"
     timeline3d: "photorealistic 3D render, cinematic natural lighting, soft clouds, detailed, vertical 9:16 composition, no text, no letters, no logos, no real people's faces"
 
-i2v:                           # optional image-to-video for the 3D-look style
-  provider: none               # none (slow zoom/pan) | fal_kling
+i2v:
+  provider: none
   fal_model: fal-ai/kling-video/v2.1/standard/image-to-video
   seconds: 5
 
 tts:
-  provider: [edge, gtts]       # tried in order. edge = free Microsoft voices, gtts = free Google voice. Others: elevenlabs (paid), silent (test)
+  provider: [elevenlabs, gemini, edge]
   gtts_lang: bn
-  edge_voice: bn-BD-NabanitaNeural     # alternatives: bn-BD-PradeepNeural, bn-IN-TanishaaNeural
+  edge_voice: bn-BD-NabanitaNeural
   edge_rate: "+0%"
-  elevenlabs_voice_id: ""
+  elevenlabs_voice_id: "j5PhP1QJv2DvlhRv3mEv"
   elevenlabs_model: eleven_multilingual_v2
 
+voice:
+  fallback_to_gemini: true
+  gemini_voice_model: gemini-3.8-flash-tts
+  gemini_voice_name: Kore
+  gemini_voice_style: "Speak in natural Bangladeshi Bengali. Use a warm, clear, conversational educational tone with gentle emotion and natural pauses. Do not sound robotic or like a news broadcast."
+
 metadata:
-  auto: true                   # the AI writes the YouTube title, description, tags and hashtags
+  auto: true
   title_max: 70
-  ai_note: "এই ভিডিওর ছবি এআই দিয়ে তৈরি।"   # added to every description ('images are AI-made'); set "" to remove
+  ai_note: "এই ভিডিওর ছবি এআই দিয়ে তৈরি।"
 
 publish:
-  require_approval: true       # true: render + send to Telegram, publish later via the Publish workflow
+  require_approval: true
   youtube: true
   facebook: false
   instagram: false
-  privacy: public              # public | unlisted | private
-  mark_synthetic: true         # tell YouTube the video contains AI-generated content
+  privacy: private
+  mark_synthetic: true
   extra_hashtags: ["#Shorts"]
+
+scripts:
+  enabled: true
+  max: 30
+  file: "scripts.json"
+  schedule: daily
+
+telegram:
+  max_script_length: 500
+  show_remaining: true

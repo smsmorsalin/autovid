@@ -1,95 +1,268 @@
-# autovid: automated Bengali short-video factory
+# Autovid
 
-Topic in → researched script → images → Bengali voice → captions → 9:16 video → Telegram review → YouTube / Facebook / Instagram.
+Autovid creates Bengali vertical short videos, sends them to Telegram for
+review, and uploads an approved video to YouTube.
 
-Two styles, chosen per topic in `topics.txt`:
-
-| style | look | scene kinds |
-|---|---|---|
-| `explainer` | dark UI + illustrated scenes ("System Ka Scene" style) | image, table, compare, code, stat |
-| `timeline3d` | full-screen 3D-look scenes, colour-coded year headings, era colour grading ("bridge history" style) | image (optionally animated by image-to-video) |
-
-```
-topics.txt ─► research (Claude + web search, sourced facts)
-          ─► script.json (Bengali scenes, JSON)
-          ─► images (fal Flux / OpenAI)  [+ optional Kling image-to-video]
-          ─► voice (edge-tts free / ElevenLabs) + word timings
-          ─► render (HTML cards + ffmpeg: motion, grade, captions)
-          ─► final.mp4 + meta.json ─► Telegram ─► (you approve) ─► YouTube/Facebook/Instagram
+```text
+topics.txt or Telegram /add
+        -> Gemini research and Bengali script
+        -> Cloudflare/Pollinations images
+        -> ElevenLabs natural voice
+        -> Gemini natural Bengali TTS fallback
+        -> Edge Bengali neural voice fallback
+        -> rendered vertical MP4
+        -> Telegram review
+        -> reply "upload"
+        -> YouTube upload and Telegram URL
 ```
 
-## 1. Try it locally (no API keys needed)
+## Free-plan services
+
+The project is designed to work with free quotas. Provider limits and model
+names can change, so check the provider dashboards if a service rejects a
+request.
+
+| Purpose | Primary provider | Fallback | Secret |
+|---|---|---|---|
+| Research and script | Gemini | — | `GEMINI_API_KEY` |
+| Images | Cloudflare Workers AI | Pollinations | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
+| Voice | ElevenLabs | Gemini TTS, then Edge TTS | `ELEVENLABS_API_KEY` optional |
+| Telegram review and commands | Telegram Bot API | — | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| YouTube upload | YouTube Data API | — | OAuth secrets |
+| Scheduling and state | GitHub Actions | — | automatic `GITHUB_TOKEN` |
+
+ElevenLabs is optional. The configured voice order is:
+
+1. ElevenLabs `eleven_multilingual_v2` (most natural when available).
+2. Gemini `gemini-3.8-flash-tts`, with a warm Bangladeshi Bengali style.
+3. Microsoft Edge `bn-BD-NabanitaNeural`, which needs no API key.
+
+## Required GitHub Actions secrets
+
+Add secrets at **Repository → Settings → Secrets and variables → Actions**:
+
+```text
+GEMINI_API_KEY
+CF_ACCOUNT_ID
+CF_API_TOKEN
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
+YT_CLIENT_ID
+YT_CLIENT_SECRET
+YT_REFRESH_TOKEN
+```
+
+Optional:
+
+```text
+ELEVENLABS_API_KEY
+FAL_KEY
+```
+
+`FAL_KEY` is only needed if you change the image or image-to-video provider to
+Fal. ElevenLabs also requires a Bangla-capable voice ID in
+`config.yaml`; the API key itself must remain a GitHub secret.
+
+### GitHub workflow permission
+
+No separate GitHub API key is required. The workflows use GitHub's automatic
+`GITHUB_TOKEN` to commit queue and progress state.
+
+Enable it once:
+
+1. Open **Repository → Settings → Actions → General**.
+2. Find **Workflow permissions**.
+3. Select **Read and write permissions**.
+4. Click **Save**.
+
+This allows Actions to commit `state/done.json`, `state/telegram.json`, and
+`scripts.json`.
+
+For complete provider and OAuth instructions, read
+[API_CONNECTION_PROCESS_AND_TELEGRAM_BOT_SETUP.md](./API_CONNECTION_PROCESS_AND_TELEGRAM_BOT_SETUP.md).
+
+## Local offline test
+
+Install the system and Python dependencies:
 
 ```bash
-pip install -r requirements.txt && python -m playwright install chromium
-sudo apt install ffmpeg fonts-noto-core          # Bengali font + ffmpeg
+pip install -r requirements.txt
+python -m playwright install chromium
+sudo apt install ffmpeg fonts-noto-core
+```
+
+Run without network APIs:
+
+```bash
 python -m autovid --config config.offline.yaml make \
-    --script samples/explainer_database_index.json --style explainer --out out/demo
+  --script samples/explainer_database_index.json \
+  --style explainer \
+  --out out/demo
 ```
-The offline config uses placeholder pictures and silent narration, just to check the layout. `config.yaml` is the real configuration.
 
-## 2. The all-free stack (no credit card, no payment)
-
-| Job | Free service | Secret name(s) |
-|---|---|---|
-| Research + script | Google Gemini API (Google AI Studio free key, Google Search grounding) | `GEMINI_API_KEY` |
-| Images | Cloudflare Workers AI (free daily allowance), with Pollinations (no key) as automatic backup | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
-| Voice | edge-tts (Microsoft Bengali voices), with Google `gTTS` as automatic backup | none |
-| Review on your phone | Telegram bot | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
-| Upload | YouTube Data API (optional, later) | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
-| Scheduler | GitHub Actions | none |
-
-How to get each key:
-* **Gemini:** aistudio.google.com → *Get API key* (needs only a Google account). Check which Flash model is free there and put its name in `llm.model` in `config.yaml`.
-* **Cloudflare:** free account at cloudflare.com → note your *Account ID* (dashboard sidebar) → *My Profile → API Tokens → Create Token* with the **Workers AI** permission.
-* **Telegram:** message @BotFather → `/newbot` → token. Send your bot a message, open `https://api.telegram.org/bot<TOKEN>/getUpdates`, copy `"chat":{"id": ...}`.
-
-Free tiers change and have daily limits. If a provider hits its limit the run falls back to the next one; if all fail, the run stops with an error instead of posting a bad video.
-
-Paid options still exist in the code (`anthropic`, `fal`, `openai`, `elevenlabs`) but are not used by default.
-
-## 3. Run it
+For a real local run, export the required environment variables and run:
 
 ```bash
-export GEMINI_API_KEY=... CF_ACCOUNT_ID=... CF_API_TOKEN=...
-python -m autovid make --topic "ক্যাশ কী" --style explainer --out out/cache
+python -m autovid next
+python -m autovid make \
+  --topic "ক্যাশ কী" \
+  --style explainer \
+  --out out/cache \
+  --notify
 ```
 
-## 4. Put it on a schedule (GitHub Actions)
+## Scheduled video process
 
-1. Push this folder to a GitHub repo. Private repos get 2,000 free Actions minutes a month (one video a day fits); public repos are free without that limit (your secrets stay hidden).
-2. Settings → Secrets and variables → Actions → add the secrets above.
-3. Settings → Actions → General → Workflow permissions → *Read and write*.
-4. Edit `topics.txt` (one `style | topic` per line) and `config.yaml` (channel name, handle, voice).
-5. **Daily video** runs every day at 04:00 UTC (10:00 Bangladesh time; edit the cron in `.github/workflows/daily.yml`). It also has a *Run workflow* button where you can type a one-off topic.
-6. **Approval:** watch the video in Telegram. To publish, run the **Publish** workflow and enter that Daily run's ID. Set `publish.require_approval: false` to post automatically.
+The `Daily video` workflow:
 
-Start with `publish.privacy: private` and one platform until you trust the output.
+1. Checks `scripts.json` first, then finds the first unfinished line in
+   `topics.txt`.
+2. Generates the researched Bengali script.
+3. Creates images and narration using the configured fallback order.
+4. Renders `final.mp4`, `meta.json`, and `script.json`.
+5. Sends the finished video to your Telegram chat.
+6. Records the completed topic in `state/done.json`.
+7. Uploads the generated files as a GitHub Actions artifact.
 
-## Quality and safety checks built in (keep them)
+The schedule is configured in
+[daily.yml](./.github/workflows/daily.yml). Its default cron is 04:00 UTC,
+which is 10:00 Bangladesh time. Change the cron if another time is required.
 
-* Script is written **only from researched facts that have source URLs**; sources are appended to the description. Still read the script before publishing: AI can misstate dates and numbers. The Telegram step is your check.
-* AI-made visuals get a small **"প্রতীকী দৃশ্য"** (representative scene) label (`images.label_ai_visuals`), and YouTube is told the video has synthetic media (`publish.mark_synthetic`).
-* Prompts forbid real people's faces, logos and on-image text.
-* YouTube and Meta demote repetitive, mass-produced content. Vary topics and keep your own voice/brand, rather than posting many near-identical videos a day.
+The workflow can also be started manually with a topic and style.
 
-## Instagram
+## Telegram workflow
 
-The Instagram API only accepts a **public https URL** of the video. Upload `final.mp4` somewhere public (for example a GitHub Release asset on a public repo, or S3) and run:
-`python -m autovid publish --dir approved --public-url https://.../final.mp4`.
+The Telegram bot is implemented in
+[telegram_bot.py](./autovid/telegram_bot.py), and
+[telegram-bot.yml](./.github/workflows/telegram-bot.yml) polls Telegram every
+five minutes. This polling design works on the free GitHub Actions plan without
+running a paid, always-on server.
 
-## Customising
+### Review and upload the generated video
 
-* **Look & feel:** `render.py` (colours, layout, caption style) and `config.yaml` (`images.style_suffix`, series name, end card).
-* **Voice:** `tts.edge_voice` (`bn-BD-NabanitaNeural`, `bn-BD-PradeepNeural`, `bn-IN-TanishaaNeural`) or switch to ElevenLabs for more natural narration.
-* **More motion in 3D style:** image-to-video (`i2v.provider: fal_kling`) is paid, so the free setup uses slow zoom/pan instead.
-* **Music:** set `video.music` to a royalty-free mp3 you have the right to use.
-* **Free-limit budget:** one video uses about 20 images, 2 Gemini calls and about 10-20 Actions minutes.
+1. The scheduled workflow sends the generated video to Telegram.
+2. Reply to that exact video message with:
 
-## Known limits
+   ```text
+   upload
+   ```
 
-* The YouTube / Facebook / Instagram uploaders call live APIs and were **not** run against real accounts when this was written. Test with a private upload first.
-* The research step uses Anthropic's server-side web search tool; the tool version name is in `config.yaml` (`llm.web_search_tool`) in case it changes.
-* Placeholder visuals are only for offline testing.
+3. The bot downloads the original generated video from Telegram.
+4. It uploads that video to YouTube using the saved title, description, and
+   tags.
+5. On success, it sends the YouTube Shorts URL back to Telegram.
+6. On failure, it sends the error message back to Telegram and leaves the
+   review item retryable.
 
-## more information
+You can upload a replacement instead: reply to the review message with another
+video. The replacement video is uploaded with the original review metadata.
+
+Only messages from `TELEGRAM_CHAT_ID` are accepted.
+
+### Telegram commands
+
+Add a topic or script to the end of the queue:
+
+```text
+/add আমার নতুন বাংলা ভিডিওর বিষয়
+```
+
+Add a timeline-style topic:
+
+```text
+/add timeline3d | বাংলাদেশের সেতুর ইতিহাস
+```
+
+Check the number of unfinished topics and queued scripts:
+
+```text
+/remaining
+```
+
+Show the instructions:
+
+```text
+/help
+```
+
+The bot sends the remaining count with each generated video as well.
+
+### Duplicate upload protection
+
+After a successful upload, the bot stores the Telegram file identifier and
+SHA-256 hash in `state/telegram.json`. If `upload` is sent again for the same
+video, it will not upload a second copy and will return the existing YouTube
+URL. The pending review item is removed only after a successful upload, so a
+failed upload can be retried.
+
+The daily workflow and Telegram polling workflow share a concurrency group to
+avoid racing while committing state.
+
+## Topic and queue files
+
+`topics.txt` supports:
+
+```text
+explainer | API কী: রেস্টুরেন্টের ওয়েটারের উদাহরণ
+timeline3d | মোবাইল ফোনের ইতিহাস
+```
+
+Telegram additions are stored in `scripts.json`. Completed topics are recorded
+in `state/done.json`. Telegram update offsets, pending review messages, and
+duplicate-upload records are stored in `state/telegram.json`.
+
+Do not delete or edit these state files while a workflow is running.
+
+## Configuration
+
+Important settings in `config.yaml`:
+
+```yaml
+tts:
+  provider: [elevenlabs, gemini, edge]
+  elevenlabs_voice_id: ""
+
+voice:
+  fallback_to_gemini: true
+  gemini_voice_model: gemini-3.8-flash-tts
+  gemini_voice_name: Kore
+
+publish:
+  youtube: true
+  privacy: private
+```
+
+For ElevenLabs:
+
+1. Open **ElevenLabs → Voices → My Voices**.
+2. Select a Bangla-capable voice.
+3. Open the three-dot menu.
+4. Choose **Copy voice ID**.
+5. Paste only the ID into `tts.elevenlabs_voice_id`.
+6. Store the API key as the GitHub secret `ELEVENLABS_API_KEY`.
+
+Start with `privacy: private`, verify the full Telegram-to-YouTube flow, and
+only then change it to `unlisted` or `public`.
+
+## YouTube requirements
+
+YouTube upload needs a one-time OAuth setup and these three secrets:
+
+```text
+YT_CLIENT_ID
+YT_CLIENT_SECRET
+YT_REFRESH_TOKEN
+```
+
+The refresh token belongs to the Google account that owns the channel. Never
+commit it to the repository. A successful upload returns:
+
+```text
+https://youtube.com/shorts/<video-id>
+```
+
+## Safety and quality
+
+Review every generated video before publishing. AI research can misstate facts,
+and generated images or narration may need correction. Keep `privacy: private`
+until the output, metadata, voice, and Telegram approval flow are trusted.

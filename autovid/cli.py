@@ -19,9 +19,45 @@ def _done():
     return json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else []
 
 
+def _scripts_file():
+    return ROOT / "scripts.json"
+
+
+def _queued_scripts():
+    path = _scripts_file()
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def add_script(value, style="explainer"):
+    """Append a Telegram-provided topic/script to the persistent queue."""
+    parsed_style, separator, topic = value.partition("|")
+    if separator and parsed_style.strip() in ("explainer", "timeline3d"):
+        style, value = parsed_style.strip(), topic.strip()
+    queue = _queued_scripts()
+    queue.append({"topic": value.strip(), "style": style, "done": False})
+    _scripts_file().write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def pending_script_count(topics_file=ROOT / "topics.txt"):
+    done = {item["topic"] for item in _done()}
+    queued = sum(1 for item in _queued_scripts() if not item.get("done"))
+    topics = 0
+    for line in pathlib.Path(topics_file).read_text(encoding="utf-8").splitlines():
+        style, _, topic = line.partition("|")
+        topic = topic.strip() if style.strip() in ("explainer", "timeline3d") else line.strip()
+        if topic and not line.lstrip().startswith("#") and topic not in done:
+            topics += 1
+    return queued + topics
+
+
 def next_topic(topics_file):
     """First line of topics.txt (format 'style | topic') that has not been produced yet."""
     done = {d["topic"] for d in _done()}
+    for item in _queued_scripts():
+        if not item.get("done") and item["topic"] not in done:
+            return item.get("style", "explainer"), item["topic"]
     for line in pathlib.Path(topics_file).read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -41,6 +77,15 @@ def mark_done(topic, style, out_dir):
               "date": datetime.date.today().isoformat()})
     STATE.parent.mkdir(exist_ok=True)
     STATE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    queue = _queued_scripts()
+    changed = False
+    for item in queue:
+        if not item.get("done") and item["topic"] == topic:
+            item["done"] = True
+            changed = True
+            break
+    if changed:
+        _scripts_file().write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main():
@@ -63,6 +108,8 @@ def main():
     p = sub.add_parser("publish", help="publish an already-rendered video dir")
     p.add_argument("--dir", required=True)
     p.add_argument("--public-url")
+
+    b = sub.add_parser("bot-poll", help="process Telegram commands and video approvals")
 
     a = ap.parse_args()
     cfg = load_config(a.config)
@@ -90,6 +137,10 @@ def main():
 
     elif a.cmd == "publish":
         publish.publish_all(a.dir, cfg, a.public_url)
+
+    elif a.cmd == "bot-poll":
+        from .telegram_bot import poll
+        poll(a.config)
 
 
 if __name__ == "__main__":
