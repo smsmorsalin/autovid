@@ -131,9 +131,18 @@ started manually with an optional topic and style.
 
 ### `Telegram bot` (`.github/workflows/telegram-bot.yml`)
 
-This workflow is required for `upload`, `/add`, and `/remaining` to work. It runs
-every five minutes (the minimum GitHub Actions interval), calls
-`python -m autovid bot-poll`, and commits `state/telegram.json` back to the repo.
+This is the legacy polling fallback. With the optional Cloudflare webhook
+described below enabled, polling is disabled by default. The scheduled job
+checks every five minutes but only calls Telegram when the repository variable
+`TELEGRAM_POLLING_ENABLED` is set to `true`.
+
+To activate polling as a fallback:
+
+1. Disable the Telegram webhook:
+   `curl -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"`.
+2. In **Settings -> Secrets and variables -> Actions -> Variables**, create or
+   update `TELEGRAM_POLLING_ENABLED` to `true`.
+3. Re-enable the webhook and set the variable back to `false` after recovery.
 
 Both workflows share the `autovid-state` concurrency group, so they never commit
 the same state file at the same time.
@@ -153,6 +162,48 @@ Keep the terminal open. It uses Telegram long polling and the same
 Do not run the local watcher and the GitHub `Telegram bot` workflow at the same
 time: Telegram allows only one `getUpdates` consumer per bot token, and the
 second one will fail with a `Conflict` error.
+
+### Instant Telegram webhook (Cloudflare Worker)
+
+The repository includes [`cloudflare-worker/`](./cloudflare-worker), which
+avoids GitHub's five-minute cron delay. Cloudflare's free Workers plan currently
+allows 100,000 requests per day, which is sufficient for a personal bot.
+
+The Worker handles `/add`, `/remaining`, and help replies directly. For
+`upload`, it immediately acknowledges the message and starts the
+`Telegram webhook upload` GitHub workflow; the workflow performs the existing
+YouTube/Facebook upload and commits state.
+
+Setup:
+
+1. Create a Cloudflare Worker and deploy `cloudflare-worker/index.js` with
+   `npx wrangler deploy` (from that directory).
+2. Add Worker secrets:
+
+   ```bash
+   npx wrangler secret put TELEGRAM_BOT_TOKEN
+   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+   npx wrangler secret put GITHUB_TOKEN
+   npx wrangler secret put TELEGRAM_CHAT_ID
+   ```
+
+   `GITHUB_TOKEN` must be a GitHub fine-grained token for `smsmorsalin/autovid`
+   with **Contents: read and write** and **Actions: read and write**. Set these
+   non-secret variables in the Worker: `GITHUB_REPO=smsmorsalin/autovid`,
+   `GITHUB_BRANCH=main`; the repository and branch are already in
+   `cloudflare-worker/wrangler.toml`.
+3. Set the Telegram webhook, replacing the Worker URL and secret:
+
+   ```bash
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+     -d "url=https://<WORKER>.workers.dev" \
+     -d "secret_token=<WEBHOOK_SECRET>"
+   ```
+
+4. Confirm the `Telegram webhook upload` workflow exists under GitHub Actions.
+
+Keep the old polling workflow disabled while the webhook is active. Telegram
+does not allow a webhook and `getUpdates` polling consumer to run together.
 
 ## Telegram workflow
 

@@ -188,7 +188,8 @@ Telegram bots do not push commands to your code. Something must read
 
 | Mode | Command | When to use |
 |---|---|---|
-| GitHub Actions cron | `.github/workflows/telegram-bot.yml` every 5 minutes | Free, no server needed |
+| Cloudflare Worker webhook | `cloudflare-worker/` | Instant replies, free for small usage |
+| GitHub Actions cron | `.github/workflows/telegram-bot.yml` optional fallback | Free, but delayed |
 | Local long polling | `python -m autovid bot-poll --watch` | Instant replies while your machine runs |
 
 The GitHub workflow is already included in this repository. Enable it:
@@ -199,8 +200,9 @@ The GitHub workflow is already included in this repository. Enable it:
 4. Check the workflow log for the processed update.
 
 GitHub's minimum cron interval is five minutes, and scheduled runs can be a few
-minutes late under load. That is normal. Use `bot-poll --watch` if you need
-instant responses.
+minutes late under load. For instant replies without leaving a computer on,
+deploy the Cloudflare Worker described in the README. Do not use the Worker
+webhook and `bot-poll` at the same time.
 
 ### 4.4 Critical state requirement
 

@@ -2,9 +2,14 @@ name: Telegram bot
 
 on:
   schedule:
-    # GitHub Actions cannot run more often than every 5 minutes.
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      enable_polling:
+        description: "Poll Telegram for this manual run"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -29,6 +34,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Process Telegram commands and uploads
+        if: vars.TELEGRAM_POLLING_ENABLED == 'true' || inputs.enable_polling == true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}

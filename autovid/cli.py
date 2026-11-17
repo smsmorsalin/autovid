@@ -113,6 +113,9 @@ def main():
     b.add_argument("--watch", action="store_true",
                    help="keep long-polling (local use); default is a single pass for GitHub Actions")
 
+    u = sub.add_parser("bot-update", help="process one Telegram webhook update")
+    u.add_argument("--update-json", required=True)
+
     v = sub.add_parser("voice-check", help="test the ElevenLabs key, plan, and voice ID")
     v.add_argument("--test", action="store_true",
                    help="also synthesize a short Bangla sample (uses a few credits)")
@@ -152,6 +155,10 @@ def main():
     elif a.cmd == "bot-poll":
         from .telegram_bot import poll
         poll(a.config, watch=a.watch)
+
+    elif a.cmd == "bot-update":
+        from .telegram_bot import process_update
+        process_update(json.loads(a.update_json), a.config)
 
     elif a.cmd == "voice-check":
         from .tts import voice_check

@@ -306,3 +306,17 @@ def poll(config_path=None, watch=False):
             break
         if not updates:
             time.sleep(1)
+
+
+def process_update(update, config_path=None):
+    """Process one Telegram update delivered by the webhook workflow."""
+    token = env("TELEGRAM_BOT_TOKEN")
+    cfg = load_config(config_path)
+    state = _state()
+    update_id = update.get("update_id")
+    if update_id is not None:
+        state["offset"] = max(state["offset"], update_id)
+    message = update.get("message")
+    if message:
+        _handle_message(message, token, cfg, state)
+    _save(state)
