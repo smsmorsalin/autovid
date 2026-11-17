@@ -217,6 +217,14 @@ def _handle_message(message, token, cfg, state):
     attached = _media(message)
     reply_media = _media(reply)
 
+    if command in ("upload", "/upload") and not state["pending"] and not reply_media:
+        _send(
+            token,
+            chat_id,
+            "কোনো ভিডিও আপলোডের জন্য অপেক্ষমাণ নেই।",
+        )
+        return
+
     # A replacement video sent as a reply to the review message.
     if attached and reply_media:
         pending = pending or _meta_from_reply(reply)
@@ -237,7 +245,11 @@ def _handle_message(message, token, cfg, state):
         if state["pending"]:
             _send(token, chat_id, "একাধিক ভিডিও অপেক্ষা করছে। যে ভিডিওটি চান তার reply হিসেবে upload লিখুন।")
         else:
-            _send(token, chat_id, "ভিডিও রিভিউ মেসেজের reply হিসেবে upload লিখুন।")
+            _send(
+                token,
+                chat_id,
+                "কোনো ভিডিও আপলোডের জন্য অপেক্ষমাণ নেই। আগে একটি ভিডিও রিভিউ মেসেজ তৈরি করুন।",
+            )
         return
 
     pending = pending or _meta_from_reply(reply)
