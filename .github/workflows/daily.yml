@@ -2,54 +2,59 @@ name: Daily video
 
 on:
   schedule:
-    - cron: "0 4 * * *"          # 04:00 UTC = 10:00 Bangladesh time. Edit to change the time.
+    # 04:00 UTC = 10:00 Bangladesh time.
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       topic:
-        description: "Optional topic override (leave empty to take the next line of topics.txt)"
+        description: "Optional topic. Leave empty to use the next queued script/topic."
         required: false
+        type: string
       style:
-        description: "Style for the override topic"
+        description: "Video style for a manual topic"
+        required: false
+        default: explainer
         type: choice
         options: [explainer, timeline3d]
-        default: explainer
 
 permissions:
-  contents: write                # to commit state/done.json
+  contents: write
 
 concurrency:
   group: autovid-state
   cancel-in-progress: false
 
 jobs:
-  make:
+  make-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
           cache: pip
 
-      - name: System packages (ffmpeg + Bengali fonts)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-ui-core fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-ui-core \
+            fonts-dejavu-core fonts-noto-color-emoji
           fc-list :lang=bn family | sort -u | head
 
-      - name: Python packages + Chromium
-        run: |
-          pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
-      - name: Make the video
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Create one video
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
@@ -62,27 +67,52 @@ jobs:
           STYLE: ${{ inputs.style }}
         run: |
           if [ -n "$TOPIC" ]; then
-            python -m autovid make --topic "$TOPIC" --style "$STYLE" --out out/manual --notify
+            python -m autovid make \
+              --topic "$TOPIC" \
+              --style "${STYLE:-explainer}" \
+              --out "out/manual-$(date +%F-%H%M)" \
+              --notify
           else
             python -m autovid next
           fi
 
       - name: Stage the result
+        if: always()
         run: |
+          META=$(find out -name meta.json | head -n 1)
+          if [ -z "$META" ]; then
+            echo "No rendered meta.json found"
+            exit 0
+          fi
           mkdir -p stage
-          D=$(ls -d out/*/ | head -1)
-          cp "$D"final.mp4 "$D"meta.json "$D"script.json stage/
+          D=$(dirname "$META")
+          cp "$D/final.mp4" "$D/meta.json" "$D/script.json" stage/
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload rendered files as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: video
           path: stage
+          if-no-files-found: ignore
           retention-days: 30
 
-      - name: Save progress (state/done.json)
+      - name: Commit queue and Telegram state
+        if: always()
         run: |
           git config user.name "autovid-bot"
           git config user.email "autovid-bot@users.noreply.github.com"
-          git add state/done.json || true
-          git add state/telegram.json scripts.json || true
-          git diff --cached --quiet || (git commit -m "autovid: mark topic done" && git push)
+          git add -A state
+          if [ -f scripts.json ]; then git add scripts.json; fi
+          if git diff --cached --quiet; then
+            echo "No state changes to commit"
+            exit 0
+          fi
+          git commit -m "autovid: state update [skip ci]"
+          for attempt in 1 2 3; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            echo "push attempt ${attempt} failed, retrying"
+            sleep 5
+          done

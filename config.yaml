@@ -6,7 +6,7 @@ series:
   end_line1: "Video credits"
   end_line2: "-Thank you for watching"
   cta: "Follow the channel"
-  episode_start: 1
+  episode_start: 00
 
 video:
   width: 1080
@@ -54,7 +54,14 @@ tts:
   edge_voice: bn-BD-NabanitaNeural
   edge_rate: "+0%"
   elevenlabs_voice_id: "j5PhP1QJv2DvlhRv3mEv"
-  elevenlabs_model: eleven_multilingual_v2
+  # eleven_v4 supports Bengali. eleven_multilingual_v2 does NOT support bn.
+  elevenlabs_model: eleven_v4
+  # Premade fallback for free keys that cannot use a Voice Library voice.
+  elevenlabs_fallback_voice_id: "cgSgspJ2msm6clMCkdW9"
+  elevenlabs_output_format: mp3_44100_128
+  elevenlabs_stability: 0.45
+  elevenlabs_similarity_boost: 0.8
+  elevenlabs_style: 0.15
 
 voice:
   fallback_to_gemini: true
@@ -70,7 +77,7 @@ metadata:
 publish:
   require_approval: true
   youtube: true
-  facebook: false
+  facebook: false        # set true after FB_PAGE_ID / FB_PAGE_TOKEN are configured
   instagram: false
   privacy: private
   mark_synthetic: true
@@ -85,3 +92,5 @@ scripts:
 telegram:
   max_script_length: 500
   show_remaining: true
+  # The GitHub Actions workflow polls every 5 minutes (the minimum cron interval).
+  poll_minutes: 5

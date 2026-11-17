@@ -110,6 +110,14 @@ def main():
     p.add_argument("--public-url")
 
     b = sub.add_parser("bot-poll", help="process Telegram commands and video approvals")
+    b.add_argument("--watch", action="store_true",
+                   help="keep long-polling (local use); default is a single pass for GitHub Actions")
+
+    v = sub.add_parser("voice-check", help="test the ElevenLabs key, plan, and voice ID")
+    v.add_argument("--test", action="store_true",
+                   help="also synthesize a short Bangla sample (uses a few credits)")
+
+    f = sub.add_parser("facebook-check", help="test the Facebook Page ID and Page access token")
 
     a = ap.parse_args()
     cfg = load_config(a.config)
@@ -130,9 +138,12 @@ def main():
         ep = cfg["series"].get("episode_start", 1) + len(_done())
         out = pathlib.Path(a.out_root) / f"{datetime.date.today().isoformat()}-{_slug(topic)}"
         pipeline.make_video(cfg, out, topic, style, None, ep)
+        # Send the review video first: if Telegram fails the topic is not marked done,
+        # so the next run retries it instead of silently skipping the video. The count
+        # is reduced by one because this topic is about to be marked done.
+        message_id = notify.telegram(out, remaining=max(0, pending_script_count() - 1))
         mark_done(topic, style, out)
-        notify.telegram(out)
-        if not cfg["publish"].get("require_approval", True):
+        if message_id and not cfg["publish"].get("require_approval", True):
             publish.publish_all(out, cfg)
 
     elif a.cmd == "publish":
@@ -140,7 +151,15 @@ def main():
 
     elif a.cmd == "bot-poll":
         from .telegram_bot import poll
-        poll(a.config)
+        poll(a.config, watch=a.watch)
+
+    elif a.cmd == "voice-check":
+        from .tts import voice_check
+        raise SystemExit(0 if voice_check(cfg, test=a.test) else 1)
+
+    elif a.cmd == "facebook-check":
+        from .publish import facebook_check
+        raise SystemExit(0 if facebook_check() else 1)
 
 
 if __name__ == "__main__":

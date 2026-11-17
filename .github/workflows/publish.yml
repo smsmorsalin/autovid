@@ -30,7 +30,17 @@ jobs:
           RUN_ID: ${{ inputs.run_id }}
         run: gh run download "$RUN_ID" --repo "${{ github.repository }}" -n video -D approved
 
-      - name: Publish
+      - name: Locate the rendered video directory
+        id: video
+        run: |
+          META=$(find approved -name meta.json | head -n 1)
+          if [ -z "$META" ]; then
+            echo "No meta.json in the downloaded artifact" >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$META")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to enabled platforms
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
@@ -38,4 +48,4 @@ jobs:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
-        run: python -m autovid publish --dir approved
+        run: python -m autovid publish --dir "${{ steps.video.outputs.dir }}"

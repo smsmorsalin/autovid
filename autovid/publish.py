@@ -1,7 +1,8 @@
 """Publishing: YouTube Shorts, Facebook Reels, Instagram Reels.
 
-NOTE: these call live platform APIs and need real credentials; they have not been run against
-your accounts. Test with privacy: private (YouTube) before turning on auto-publish.
+These call live platform APIs and need real credentials. Start with
+`publish.privacy: private` on YouTube, verify the Telegram approval flow, and only
+then make the video public.
 """
 import pathlib
 import time
@@ -9,6 +10,8 @@ import time
 import requests
 
 from .util import env, log, read_json
+
+GRAPH = "https://graph.facebook.com/v21.0"
 
 
 # ------------------------------------------------------------------ YouTube
@@ -45,58 +48,150 @@ def youtube(video, meta, cfg):
 
 
 # ------------------------------------------------------------------ Facebook Reels (Page)
+def _fb_error(response, action):
+    try:
+        detail = response.json().get("error", {})
+        message = detail.get("message") or response.text
+        code = detail.get("code")
+        return f"Facebook {action} failed {response.status_code} (code={code}): {str(message)[:500]}"
+    except Exception:
+        return f"Facebook {action} failed {response.status_code}: {response.text[:500]}"
+
+
 def facebook_reel(video, meta, cfg):
-    page, token = env("FB_PAGE_ID"), env("FB_PAGE_TOKEN")
-    g = "https://graph.facebook.com/v21.0"
-    r = requests.post(f"{g}/{page}/video_reels", data={"upload_phase": "start", "access_token": token}, timeout=60)
-    r.raise_for_status()
-    vid, upload_url = r.json()["video_id"], r.json()["upload_url"]
-    data = pathlib.Path(video).read_bytes()
-    u = requests.post(upload_url, data=data, timeout=1800, headers={
-        "Authorization": "OAuth " + token, "offset": "0", "file_size": str(len(data))})
-    u.raise_for_status()
-    f = requests.post(f"{g}/{page}/video_reels", data={
-        "upload_phase": "finish", "video_id": vid, "video_state": "PUBLISHED",
-        "description": meta["description"][:2000], "access_token": token}, timeout=120)
-    f.raise_for_status()
-    log("Facebook reel published:", vid)
-    return vid
+    """Publish a Reel to a Facebook Page through the free Meta Graph API.
+
+    Secrets: FB_PAGE_ID and FB_PAGE_TOKEN (a *Page* access token with
+    pages_show_list, pages_read_engagement and pages_manage_posts).
+    """
+    page = env("FB_PAGE_ID")
+    token = env("FB_PAGE_TOKEN")
+    path = pathlib.Path(video)
+
+    start = requests.post(f"{GRAPH}/{page}/video_reels", data={
+        "upload_phase": "start", "access_token": token}, timeout=60)
+    if start.status_code >= 400:
+        raise RuntimeError(_fb_error(start, "start"))
+    payload = start.json()
+    video_id, upload_url = payload["video_id"], payload["upload_url"]
+
+    size = path.stat().st_size
+    with open(path, "rb") as handle:
+        upload = requests.post(upload_url, data=handle, timeout=1800, headers={
+            "Authorization": "OAuth " + token,
+            "Content-Type": "application/octet-stream",
+            "offset": "0",
+            "file_size": str(size),
+        })
+    if upload.status_code >= 400:
+        raise RuntimeError(_fb_error(upload, "upload"))
+
+    description = (meta.get("description") or meta.get("title") or "")[:2000]
+    finish = requests.post(f"{GRAPH}/{page}/video_reels", data={
+        "upload_phase": "finish",
+        "video_id": video_id,
+        "video_state": "PUBLISHED",
+        "description": description,
+        "access_token": token,
+    }, timeout=120)
+    if finish.status_code >= 400:
+        raise RuntimeError(_fb_error(finish, "publish"))
+
+    log("Facebook reel published:", video_id)
+    return video_id
+
+
+# Kept as a friendly alias for older scripts/docs.
+facebook = facebook_reel
+
+
+def facebook_check():
+    """Verify FB_PAGE_ID + FB_PAGE_TOKEN before enabling real uploads."""
+    page, token = env("FB_PAGE_ID", False), env("FB_PAGE_TOKEN", False)
+    print(f"Facebook page ID : {page or '(missing FB_PAGE_ID)'}")
+    if not page or not token:
+        print("Page token       : MISSING (set FB_PAGE_ID and FB_PAGE_TOKEN)")
+        return False
+    print("Page token       : present")
+    try:
+        r = requests.get(f"{GRAPH}/{page}", params={
+            "fields": "id,name", "access_token": token}, timeout=60)
+        if r.status_code >= 400:
+            print(f"Page check       : FAILED {_fb_error(r, 'page check')}")
+            return False
+        data = r.json()
+        print(f"Page check       : OK ({data.get('name', 'unknown')} / {data.get('id')})")
+    except Exception as exc:
+        print(f"Page check       : FAILED {exc}")
+        return False
+    try:
+        perms = requests.get(f"{GRAPH}/{page}/permissions", params={
+            "access_token": token}, timeout=60)
+        if perms.status_code < 400:
+            rows = perms.json().get("data", [])
+            granted = [row.get("permission") for row in rows if row.get("status") == "granted"]
+            print("Permissions      : " + (", ".join(granted) or "(none reported)"))
+        else:
+            print("Permissions      : could not read (this is normal for some Page tokens)")
+    except Exception:
+        pass
+    print("Result           : READY (needs pages_manage_posts to publish)")
+    return True
 
 
 # ------------------------------------------------------------------ Instagram Reels
 def instagram_reel(public_video_url, meta, cfg):
-    """Instagram needs a PUBLIC https URL of the mp4 (e.g. a GitHub Release asset on a public repo, or S3)."""
+    """Instagram needs a PUBLIC https URL of the mp4 (GitHub Release asset, S3, etc.)."""
     ig, token = env("IG_USER_ID"), env("FB_PAGE_TOKEN")
-    g = "https://graph.facebook.com/v21.0"
-    c = requests.post(f"{g}/{ig}/media", data={
+    c = requests.post(f"{GRAPH}/{ig}/media", data={
         "media_type": "REELS", "video_url": public_video_url,
         "caption": meta["description"][:2000], "access_token": token}, timeout=120)
     c.raise_for_status()
     cid = c.json()["id"]
     for _ in range(60):
-        s = requests.get(f"{g}/{cid}", params={"fields": "status_code", "access_token": token}, timeout=60).json()
+        s = requests.get(f"{GRAPH}/{cid}", params={"fields": "status_code", "access_token": token}, timeout=60).json()
         if s.get("status_code") == "FINISHED":
             break
         if s.get("status_code") == "ERROR":
             raise RuntimeError("Instagram processing error: " + str(s))
         time.sleep(10)
-    p = requests.post(f"{g}/{ig}/media_publish", data={"creation_id": cid, "access_token": token}, timeout=120)
+    p = requests.post(f"{GRAPH}/{ig}/media_publish", data={"creation_id": cid, "access_token": token}, timeout=120)
     p.raise_for_status()
     log("Instagram reel published:", p.json().get("id"))
     return p.json().get("id")
 
 
 def publish_all(out_dir, cfg, public_url=None):
+    """Publish to every enabled platform, continuing if one platform fails.
+
+    Returns {"results": {platform: id/url}, "errors": {platform: message}}.
+    """
     out_dir = pathlib.Path(out_dir)
     meta = read_json(out_dir / "meta.json")
     video = out_dir / "final.mp4"
     pub = cfg["publish"]
+    results, errors = {}, {}
+
     if pub.get("youtube"):
-        youtube(video, meta, cfg)
+        try:
+            vid = youtube(video, meta, cfg)
+            results["youtube"] = f"https://youtube.com/shorts/{vid}"
+        except (Exception, SystemExit) as exc:
+            errors["youtube"] = str(exc)
     if pub.get("facebook"):
-        facebook_reel(video, meta, cfg)
+        try:
+            results["facebook"] = facebook_reel(video, meta, cfg)
+        except (Exception, SystemExit) as exc:
+            errors["facebook"] = str(exc)
     if pub.get("instagram"):
         if not public_url:
-            log("Instagram skipped: pass --public-url (a public https link to final.mp4)")
+            errors["instagram"] = "skipped: pass --public-url (a public https link to final.mp4)"
         else:
-            instagram_reel(public_url, meta, cfg)
+            try:
+                results["instagram"] = instagram_reel(public_url, meta, cfg)
+            except (Exception, SystemExit) as exc:
+                errors["instagram"] = str(exc)
+
+    for name, error in errors.items():
+        log(f"{name}: {error}")
+    return {"results": results, "errors": errors}

@@ -1,5 +1,16 @@
-"""Send rendered videos to Telegram and record messages awaiting approval."""
-import json
+"""Send rendered videos to Telegram and record messages awaiting approval.
+
+`state/telegram.json` is the bridge between the render job and the bot-poll job:
+
+    {
+      "offset": 123456789,          # last processed Telegram update_id
+      "pending": {"<message_id>": {title, description, tags, topic, video_file_id, dir}},
+      "uploaded": {"<file_unique_id>": {"youtube": "...", "facebook": "..."}}
+    }
+
+Both jobs must persist this file (the GitHub workflows commit it back to the repo).
+Without that shared file the bot cannot match an "upload" reply to the review video.
+"""
 import pathlib
 
 import requests
@@ -10,9 +21,15 @@ STATE = ROOT / "state" / "telegram.json"
 
 
 def _state():
-    if STATE.exists():
-        return read_json(STATE)
-    return {"offset": 0, "pending": {}, "uploaded": {}}
+    state = read_json(STATE) if STATE.exists() else {}
+    state.setdefault("offset", 0)
+    state.setdefault("pending", {})
+    state.setdefault("uploaded", {})
+    # Older versions stored uploaded[<id>] as a plain YouTube URL string.
+    for key, value in list(state["uploaded"].items()):
+        if isinstance(value, str):
+            state["uploaded"][key] = {"youtube": value}
+    return state
 
 
 def _save(state):
@@ -20,15 +37,25 @@ def _save(state):
     write_json(STATE, state)
 
 
-def telegram(out_dir, text_extra=""):
+def _send(token, chat_id, text):
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data={"chat_id": chat_id, "text": text[:4096]},
+        timeout=60,
+    )
+    response.raise_for_status()
+    return response.json().get("result", {})
+
+
+def telegram(out_dir, text_extra="", remaining=None):
     token, chat = env("TELEGRAM_BOT_TOKEN", False), env("TELEGRAM_CHAT_ID", False)
     if not token or not chat:
         log("Telegram not configured, skipping notification")
         return None
-    out_dir = pathlib.Path(out_dir)
+    out_dir = pathlib.Path(out_dir).resolve()
     meta = read_json(out_dir / "meta.json")
-    caption = f"ভিডিও রিভিউ: {meta['title']}\n\n{text_extra}\n"
-    caption += "আপলোড করতে এই মেসেজের reply হিসেবে upload লিখুন।\n"
+    caption = f"ভিডিও রিভিউ: {meta.get('title', '')}\n\n{text_extra}\n"
+    caption += "আপলোড করতে এই ভিডিও মেসেজের reply হিসেবে upload লিখুন।\n"
     caption += "বিকল্প হিসেবে reply করে নতুন ভিডিওও পাঠাতে পারেন।\n"
     caption += "অথবা /remaining লিখে বাকি স্ক্রিপ্ট দেখুন।"
     video = out_dir / "final.mp4"
@@ -42,18 +69,16 @@ def telegram(out_dir, text_extra=""):
     message = response.json().get("result", {})
     state = _state()
     state["pending"][str(message["message_id"])] = {
-        "title": meta["title"],
-        "description": meta["description"],
+        "title": meta.get("title", ""),
+        "description": meta.get("description", ""),
         "tags": meta.get("tags", []),
         "topic": meta.get("topic", ""),
+        "dir": str(out_dir),
         "video_file_id": (message.get("video") or {}).get("file_id"),
     }
     _save(state)
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat, "text": f"বাকি স্ক্রিপ্ট: {remaining_scripts()}"},
-        timeout=60,
-    ).raise_for_status()
+    count = remaining_scripts() if remaining is None else remaining
+    _send(token, chat, f"বাকি স্ক্রিপ্ট: {count}")
     log("Telegram notified")
     return message["message_id"]
 

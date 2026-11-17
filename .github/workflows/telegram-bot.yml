@@ -2,6 +2,7 @@ name: Telegram bot
 
 on:
   schedule:
+    # GitHub Actions cannot run more often than every 5 minutes.
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
@@ -15,24 +16,48 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - name: Process Telegram messages
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Process Telegram commands and uploads
         env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
         run: python -m autovid bot-poll
-      - name: Save bot state
+
+      - name: Commit Telegram state
+        if: always()
         run: |
           git config user.name "autovid-bot"
           git config user.email "autovid-bot@users.noreply.github.com"
-          git add state/telegram.json scripts.json || true
-          git diff --cached --quiet || (git commit -m "autovid: save Telegram bot state" && git push)
+          git add -A state
+          if [ -f scripts.json ]; then git add scripts.json; fi
+          if git diff --cached --quiet; then
+            echo "No state changes to commit"
+            exit 0
+          fi
+          git commit -m "autovid: telegram state update [skip ci]"
+          for attempt in 1 2 3; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            echo "push attempt ${attempt} failed, retrying"
+            sleep 5
+          done
