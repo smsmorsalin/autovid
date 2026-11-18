@@ -156,7 +156,10 @@ def _gemini(cfg, system, user, search, max_tokens):
                 return text
             errors.append(f"{model}{' +search' if use_search else ''}: {r.status_code} {r.text[:160]}")
             log(f"Gemini {model}{' with search' if use_search else ''} -> {r.status_code}")
-            if r.status_code not in (404, 429, 599):
+            # Temporary service errors can affect one model or a regional
+            # backend. _gem_post has already retried them; let model discovery
+            # try another available Flash model before failing the run.
+            if r.status_code not in (404, 429, 500, 502, 503, 504, 599):
                 raise RuntimeError(f"Gemini API error {r.status_code}: {r.text[:500]}")
             if r.status_code == 404:
                 break                                    # model gone: next model, no point retrying without search
