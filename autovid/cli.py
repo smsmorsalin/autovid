@@ -52,6 +52,21 @@ def pending_script_count(topics_file=ROOT / "topics.txt"):
     return queued + topics
 
 
+def _is_pending_topic(topic, topics_file=ROOT / "topics.txt"):
+    if topic in {item["topic"] for item in _done()}:
+        return False
+    if any(not item.get("done") and item.get("topic") == topic for item in _queued_scripts()):
+        return True
+    for line in pathlib.Path(topics_file).read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        style, _, candidate = line.partition("|")
+        candidate = candidate.strip() if style.strip() in ("explainer", "timeline3d") else line.strip()
+        if candidate == topic:
+            return True
+    return False
+
+
 def next_topic(topics_file):
     """First line of topics.txt (format 'style | topic') that has not been produced yet."""
     done = {d["topic"] for d in _done()}
@@ -110,6 +125,11 @@ def main():
     m.add_argument("--episode", type=int)
     m.add_argument("--notify", action="store_true", help="send the result to Telegram")
 
+    c = sub.add_parser("create", help="create one requested topic and send it to Telegram for review")
+    c.add_argument("--topic", required=True)
+    c.add_argument("--style", default="explainer", choices=["explainer", "timeline3d"])
+    c.add_argument("--out-root", default="out")
+
     n = sub.add_parser("next", help="take the next topic from topics.txt, make it, notify/publish")
     n.add_argument("--topics", default=str(ROOT / "topics.txt"))
     n.add_argument("--out-root", default="out")
@@ -140,6 +160,21 @@ def main():
         pipeline.make_video(cfg, a.out, a.topic, a.style, a.script, ep)
         if a.notify:
             notify.telegram(a.out)
+
+    elif a.cmd == "create":
+        from . import pipeline
+        topic = a.topic.strip()
+        if not topic:
+            raise ValueError("A topic is required to create a video")
+        was_pending = _is_pending_topic(topic)
+        remaining = max(0, pending_script_count() - int(was_pending))
+        ep = cfg["series"].get("episode_start", 1) + len(_done())
+        out = pathlib.Path(a.out_root) / f"{datetime.datetime.now():%Y-%m-%d-%H%M%S}-{_slug(topic)}"
+        pipeline.make_video(cfg, out, topic, a.style, None, ep)
+        message_id = notify.telegram(out, remaining=remaining)
+        if not message_id:
+            raise RuntimeError("Video was created but could not be sent to Telegram for review")
+        mark_done(topic, a.style, out)
 
     elif a.cmd == "next":
         style, topic = next_topic(a.topics)

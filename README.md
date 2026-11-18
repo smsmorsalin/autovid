@@ -10,7 +10,7 @@ YouTube visibility is currently set to **public** in `config.yaml`. Replying
 `publish.privacy` to `private` if you want approved test uploads hidden.
 
 ```text
-topics.txt or Telegram /add
+topics.txt or Telegram /add or /create
         -> Gemini research and Bengali script
         -> Cloudflare/Pollinations images
         -> ElevenLabs natural voice
@@ -262,6 +262,31 @@ does not allow a webhook and `getUpdates` polling consumer to run together.
 
 ## Telegram workflow
 
+### Create a video from Telegram
+
+First push the current project changes to the repository's `main` branch. This
+includes `.github/workflows/telegram-create.yml`; without it GitHub cannot start
+the generation job. The Cloudflare Worker is already deployed. After pushing,
+send `/start` once so Telegram refreshes the bot's command menu.
+
+Send a topic directly to the bot:
+
+```text
+create "ক্লাউড কম্পিউটিং কী: ভাড়া বাসার উদাহরণ"
+```
+
+The bot starts a GitHub Actions video-generation run, then sends the finished
+video to Telegram for review. Reply `upload` to that exact video message to
+publish it. `/create <topic>` also works. The bot registers `/create`,
+`/remaining`, `/add`, `/upload`, and `/help` in Telegram's command menu when it
+receives a message after the Worker update is deployed. You can also request a
+timeline video with `create timeline3d | <topic>`.
+
+If the Worker cannot dispatch the request, it replies with the error. If video
+generation raises an exception, Autovid sends a redacted error summary and the
+GitHub Actions run link. Failures during setup, before Autovid starts, send an
+alert with the run link so you can open the failed step's logs.
+
 ### Review and upload
 
 1. The scheduled workflow sends the review video to Telegram.
@@ -298,16 +323,19 @@ Only messages from `TELEGRAM_CHAT_ID` are accepted.
 ### Commands
 
 ```text
+create "ক্লাউড কম্পিউটিং কী: ভাড়া বাসার উদাহরণ"
 /add আমার নতুন বাংলা ভিডিওর বিষয়
 /add timeline3d | বাংলাদেশের সেতুর ইতিহাস
 /remaining
+/upload (reply to a review video)
 /help
 ```
 
-`/add` appends to the end of `scripts.json`. The bot also accepts these commands
-without the leading slash, accepts `/command@botname` syntax, and treats the
-common `/remaning` spelling as an alias for `/remaining`. The remaining count is
-also sent with every generated video.
+`create` generates the requested topic immediately and sends the result for
+review. `/add` appends to the end of `scripts.json`. The bot also accepts these
+commands without the leading slash, accepts `/command@botname` syntax, and
+treats the common `/remaning` spelling as an alias for `/remaining`. The
+remaining count is also sent with every generated video.
 
 ### Duplicate upload protection
 

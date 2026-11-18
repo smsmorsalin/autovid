@@ -1,0 +1,99 @@
+name: Telegram create video
+
+on:
+  repository_dispatch:
+    types: [telegram_create_video]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autovid-state
+  cancel-in-progress: false
+
+jobs:
+  create-video:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-ui-core \
+            fonts-dejavu-core fonts-noto-color-emoji
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Create video and send it for review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          TOPIC: ${{ github.event.client_payload.topic }}
+          STYLE: ${{ github.event.client_payload.style }}
+        run: |
+          python -m autovid create \
+            --topic "$TOPIC" \
+            --style "${STYLE:-explainer}"
+
+      - name: Commit generated topic and Telegram state
+        if: always()
+        run: |
+          git config user.name "autovid-bot"
+          git config user.email "autovid-bot@users.noreply.github.com"
+          git add -A state
+          if [ -f scripts.json ]; then git add scripts.json; fi
+          if git diff --cached --quiet; then
+            echo "No state changes to commit"
+            exit 0
+          fi
+          git commit -m "autovid: Telegram-created video state [skip ci]"
+          for attempt in 1 2 3; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            echo "push attempt ${attempt} failed, retrying"
+            sleep 5
+          done
+
+      - name: Notify Telegram about workflow failure
+        if: failure()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -f "$RUNNER_TEMP/autovid-error-notified" ]; then
+            echo "Detailed exception alert was already sent from the Autovid process."
+            exit 0
+          fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram credentials are unavailable; cannot send failure alert."
+            exit 0
+          fi
+          MESSAGE="⚠️ Telegram video creation failed. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl --connect-timeout 10 --max-time 20 --silent --show-error --fail \
+            --request POST \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"

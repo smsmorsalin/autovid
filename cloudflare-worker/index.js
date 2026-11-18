@@ -1,4 +1,5 @@
 const jsonHeaders = { "content-type": "application/json" };
+let commandMenuSet = false;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
@@ -69,6 +70,27 @@ async function sendTelegram(env, chatId, text) {
   if (!response.ok) throw new Error(`Telegram API ${response.status}`);
 }
 
+async function setTelegramCommands(env) {
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      commands: [
+        { command: "create", description: "Create a video for review" },
+        { command: "remaining", description: "Show remaining topics" },
+        { command: "add", description: "Add a topic to the queue" },
+        { command: "upload", description: "Upload the replied video" },
+        { command: "help", description: "Show bot instructions" },
+      ],
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(`Telegram setMyCommands failed: ${JSON.stringify(result).slice(0, 300)}`);
+  }
+  commandMenuSet = true;
+}
+
 function safeErrorMessage(error, env) {
   let message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   for (const secret of [env.GITHUB_TOKEN, env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET]) {
@@ -107,9 +129,31 @@ async function dispatchUpload(env, update) {
   });
 }
 
+async function dispatchCreate(env, topic, style, updateId) {
+  const workflow = await readFile(env, ".github/workflows/telegram-create.yml");
+  if (!workflow.sha) {
+    throw new Error("Telegram create workflow is not on GitHub yet. Push the project changes to the main branch first.");
+  }
+  await github(null, env, "dispatches", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      event_type: "telegram_create_video",
+      client_payload: { topic, style, update_id: updateId },
+    }),
+  });
+}
+
 async function processUpdate(env, update) {
   const message = update.message;
   if (!message) return;
+  if (!commandMenuSet) {
+    try {
+      await setTelegramCommands(env);
+    } catch (error) {
+      console.error("Could not register Telegram command menu", safeErrorMessage(error, env));
+    }
+  }
   const chatId = String(message.chat?.id || "");
   const raw = String(message.text || "").trim();
   const [first, ...rest] = raw.split(/\s+/);
@@ -117,9 +161,30 @@ async function processUpdate(env, update) {
   const argument = rest.join(" ").trim();
 
   if (["/start", "start", "/help", "help"].includes(command)) {
-    await sendTelegram(env, chatId, "Use upload to publish a review video, /add <topic> to queue a script, or /remaining to see the queue.");
+    await sendTelegram(env, chatId, "ভিডিও তৈরি: create <topic> লিখুন। ভিডিও রিভিউ পাওয়ার পর সেই মেসেজের reply হিসেবে upload লিখলে প্রকাশ হবে।\n/remaining - বাকি টপিক\n/add <topic> - কিউতে টপিক যোগ\n/help - সাহায্য");
   } else if (["/remaining", "/remaning", "remaining", "remaning", "/queue", "queue"].includes(command)) {
     await sendTelegram(env, chatId, `বাকি স্ক্রিপ্ট: ${await queueCount(env)}`);
+  } else if (["/create", "create"].includes(command)) {
+    let topic = argument;
+    if ((topic.startsWith('"') && topic.endsWith('"')) ||
+        (topic.startsWith("'") && topic.endsWith("'")) ||
+        (topic.startsWith("“") && topic.endsWith("”"))) {
+      topic = topic.slice(1, -1).trim();
+    }
+    let style = "explainer";
+    const separator = topic.indexOf("|");
+    if (separator >= 0 && ["explainer", "timeline3d"].includes(topic.slice(0, separator).trim())) {
+      style = topic.slice(0, separator).trim();
+      topic = topic.slice(separator + 1).trim();
+    }
+    if (!topic) {
+      await sendTelegram(env, chatId, 'ব্যবহার: create "আপনার ভিডিওর টপিক"');
+    } else if (topic.length > 500) {
+      await sendTelegram(env, chatId, "টপিক 500 অক্ষরের বেশি হতে পারবে না।");
+    } else {
+      await dispatchCreate(env, topic, style, update.update_id);
+      await sendTelegram(env, chatId, `🎬 ভিডিও তৈরির কাজ শুরু হয়েছে: ${topic}\nতৈরি হলে রিভিউ ভিডিও পাঠাব।`);
+    }
   } else if (["/add", "add"].includes(command)) {
     if (!argument) {
       await sendTelegram(env, chatId, "ব্যবহার: /add <বাংলা স্ক্রিপ্ট বা টপিক>");

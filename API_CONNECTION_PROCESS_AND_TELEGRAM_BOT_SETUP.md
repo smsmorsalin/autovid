@@ -161,7 +161,7 @@ python -m autovid --config config.offline.yaml make \
 
 ---
 
-## 4. Telegram bot (review, `upload`, `/add`, `/remaining`)
+## 4. Telegram bot (`create`, review, `upload`, `/add`, `/remaining`)
 
 ### 4.1 Create the bot
 
@@ -237,12 +237,20 @@ The project Worker is named `autovid-telegram` and its production URL is:
 https://autovid-telegram.smsmorsalin.workers.dev
 ```
 
-The Worker responds to `/start`, `/help`, `/add`, and `/remaining`. For `upload`,
-it acknowledges Telegram immediately, dispatches the `Telegram webhook upload`
-GitHub Actions workflow in the background, and then confirms processing started.
-That workflow downloads the video, publishes it, and commits updated Telegram
-state. If dispatch fails, the Worker sends an error reply rather than allowing
-Telegram to retry the same update and repeat the acknowledgement.
+The Worker registers `/create`, `/remaining`, `/add`, `/upload`, and `/help` in
+Telegram's command menu when it receives a message, and responds to those
+commands plus plain-text `create` and `upload`. For example, send:
+
+```text
+create "ক্লাউড কম্পিউটিং কী: ভাড়া বাসার উদাহরণ"
+```
+
+The Worker dispatches the `Telegram create video` workflow. It renders the
+requested topic and sends the video to Telegram for review. Reply `upload` to
+that video to approve and publish it. The Worker dispatches the separate
+`Telegram webhook upload` workflow, which downloads and publishes the video,
+then commits updated Telegram state. Worker-side errors are reported in Telegram;
+GitHub Actions failures include an error summary and a link to the run.
 
 Create or update these as **Production Secrets** for the `autovid-telegram`
 Worker in **Workers & Pages -> Settings -> Variables and Secrets**:
