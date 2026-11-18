@@ -1,20 +1,23 @@
 # API connection and Telegram bot setup
 
-This is the end-to-end setup guide: collect every key, store it as a GitHub
-Actions secret, connect Telegram, and publish a reviewed video to YouTube
-(optionally also to Facebook Reels when you enable it).
+This guide explains which credentials belong in GitHub Actions and which belong
+in the Cloudflare Telegram Worker, then walks through generating a video,
+reviewing it in Telegram, and publishing it to YouTube (or Facebook when enabled).
 
 Never put API keys, OAuth secrets, refresh tokens, Page tokens, or the bot token
-in `config.yaml`, `topics.txt`, source files, or git. They belong in GitHub
-Actions secrets (or your local shell for testing).
+in `config.yaml`, `topics.txt`, source files, or git. GitHub Actions credentials
+belong in GitHub Actions secrets. Telegram webhook credentials belong in
+Cloudflare Worker Secrets. Use a local shell only for temporary testing; never
+commit secret values.
 
 ## 0. What connects to what
 
 ```text
 Google AI Studio key  -> Gemini script research + Gemini TTS fallback
 ElevenLabs key        -> natural Bangla voice (optional)
-Cloudflare token      -> images (Pollinations is the no-key fallback)
-Telegram bot token    -> review video + commands
+Cloudflare Workers AI -> images (Pollinations is the no-key fallback)
+Telegram bot token    -> review video + bot commands
+Cloudflare Worker     -> instant Telegram webhook; `/upload` dispatches a GitHub workflow
 YouTube OAuth secrets -> YouTube Shorts upload
 Meta Page token       -> Facebook Reels upload
 
@@ -27,8 +30,8 @@ Once configured, the complete loop is:
 ```text
 Daily video workflow renders and sends the video to Telegram
         -> you reply `upload` to that video
-        -> Telegram bot workflow publishes to YouTube
-           (and Facebook Reels too when publish.facebook: true)
+        -> Cloudflare Worker dispatches the Telegram webhook upload workflow
+        -> GitHub Actions publishes to enabled platforms
         -> you receive a per-platform success/failure report
 ```
 
@@ -58,10 +61,12 @@ voice:
   gemini_voice_name: Kore
 ```
 
-Model names change. If Gemini returns 404, the script generator automatically
-tries the newest available Flash models. For TTS, update
-`voice.gemini_voice_model` to a model that exists for your key. The free quota is
-shown at <https://aistudio.google.com/rate-limit>.
+Model names and free quotas can change. If Gemini returns a missing-model or a
+temporary service/rate-limit error, the script generator retries and can try
+other Flash models available to your key. If Google Search grounding is
+rate-limited but an ungrounded request succeeds, the generated script is marked
+as unverified. For TTS, update `voice.gemini_voice_model` to a model available to
+your key. Check current quota at <https://aistudio.google.com/rate-limit>.
 
 Google AI Studio is used only for Gemini. It is not a Facebook tool.
 
@@ -164,27 +169,44 @@ python -m autovid --config config.offline.yaml make \
 2. Send `/newbot`.
 3. Choose a display name and a username ending in `bot`.
 4. Copy the token that BotFather returns.
-5. Add it as the GitHub secret `TELEGRAM_BOT_TOKEN`.
+5. Add it as the GitHub Actions secret `TELEGRAM_BOT_TOKEN` so the daily video
+   and optional polling workflow can send messages.
+6. If using the Cloudflare webhook, also add the same token as a Cloudflare
+   Worker Secret named `TELEGRAM_BOT_TOKEN`.
 
 ### 4.2 Get your chat ID
 
 1. Open your new bot and send `/start`.
-2. Visit this URL in a browser, replacing `<TOKEN>`:
+2. Before setting the webhook, get updates with the Bot API. Keep the token out
+   of browser history and chat; enter it invisibly in a terminal:
 
-   ```text
-   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```bash
+   read -rsp "Telegram bot token: " BOT_TOKEN; echo
+   ```
+
+   Enter the token, then run:
+
+   ```bash
+   curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates"
+   ```
+
+   After copying the chat ID, clear the temporary value:
+
+   ```bash
+   unset BOT_TOKEN
    ```
 
 3. Find `result[].message.chat.id`. It is usually a positive number for a
    private chat.
-4. Add it as the GitHub secret `TELEGRAM_CHAT_ID`.
+4. Add it as the GitHub Actions secret `TELEGRAM_CHAT_ID`. For webhook mode, add
+   the same value as a Cloudflare Worker Secret named `TELEGRAM_CHAT_ID`.
 
 Only this chat ID is allowed to use the bot.
 
 ### 4.3 How the bot receives messages
 
-Telegram bots do not push commands to your code. Something must read
-`getUpdates`. Autovid has two supported ways:
+Telegram bots need an update receiver. Autovid supports these modes; use only
+one receiver at a time:
 
 | Mode | Command | When to use |
 |---|---|---|
@@ -192,37 +214,110 @@ Telegram bots do not push commands to your code. Something must read
 | GitHub Actions cron | `.github/workflows/telegram-bot.yml` optional fallback | Free, but delayed |
 | Local long polling | `python -m autovid bot-poll --watch` | Instant replies while your machine runs |
 
-The GitHub workflow is already included in this repository. Enable it:
+The GitHub polling workflow is included as a fallback. To use it, remove the
+webhook first, then set the repository variable `TELEGRAM_POLLING_ENABLED` to
+`true`:
 
-1. Open **Actions -> Telegram bot**.
-2. Click **Run workflow** once to verify it starts.
-3. Send `/help` to the bot and wait up to five minutes.
-4. Check the workflow log for the processed update.
+1. Call Telegram's `deleteWebhook` method for the bot.
+2. In **Settings -> Secrets and variables -> Actions -> Variables**, set
+   `TELEGRAM_POLLING_ENABLED` to `true`.
+3. Open **Actions -> Telegram bot** and run it once with polling enabled.
+4. Send `/help` and check the workflow log. The scheduled workflow checks every
+   five minutes, so replies can be delayed.
 
-GitHub's minimum cron interval is five minutes, and scheduled runs can be a few
-minutes late under load. For instant replies without leaving a computer on,
-deploy the Cloudflare Worker described in the README. Do not use the Worker
-webhook and `bot-poll` at the same time.
+To return to webhook mode, set `TELEGRAM_POLLING_ENABLED` to `false` or delete
+the variable, then register the Cloudflare webhook. Do not run the local
+`bot-poll` watcher or GitHub polling while a webhook is active.
 
-### 4.4 Critical state requirement
+### 4.4 Cloudflare webhook (current instant mode)
+
+The project Worker is named `autovid-telegram` and its production URL is:
+
+```text
+https://autovid-telegram.smsmorsalin.workers.dev
+```
+
+The Worker responds to `/start`, `/help`, `/add`, and `/remaining`. For `upload`,
+it acknowledges the message and starts the `Telegram webhook upload` GitHub
+Actions workflow. That workflow downloads the video, publishes it, and commits
+updated Telegram state.
+
+Create or update these as **Production Secrets** for the `autovid-telegram`
+Worker in **Workers & Pages -> Settings -> Variables and Secrets**:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
+TELEGRAM_WEBHOOK_SECRET
+GITHUB_TOKEN
+```
+
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are also GitHub Actions secrets for
+the daily review workflow. `TELEGRAM_WEBHOOK_SECRET` is a long random string you
+create; use the same value when registering the webhook. `GITHUB_TOKEN` is a
+GitHub fine-grained personal access token stored only in Cloudflare. Limit it to
+the `smsmorsalin/autovid` repository and grant **Contents: read and write**
+permission. This permission supports the dispatch and file operations used by
+the Worker. `GITHUB_TOKEN` is a Cloudflare secret name; GitHub Actions does not
+allow creating a secret with that name.
+
+The non-secret `GITHUB_REPO` and `GITHUB_BRANCH` values are already in
+`cloudflare-worker/wrangler.toml`.
+
+Register the webhook without putting credentials in shell history. Run each
+line separately. When prompted, paste the value; it will not appear on screen:
+
+```bash
+read -rsp "Telegram bot token: " BOT_TOKEN; echo
+```
+
+Enter the token, then run:
+
+```bash
+read -rsp "Webhook secret: " WEBHOOK_SECRET; echo
+```
+
+Enter the same secret saved in Cloudflare, then run:
+
+```bash
+curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+  --data-urlencode "url=https://autovid-telegram.smsmorsalin.workers.dev" \
+  --data-urlencode "secret_token=${WEBHOOK_SECRET}"
+```
+
+Clear the temporary shell values:
+
+```bash
+unset BOT_TOKEN WEBHOOK_SECRET
+```
+
+A successful response contains `"ok":true`. Test `/start` and `/remaining` in
+Telegram. Keep `TELEGRAM_POLLING_ENABLED` false or unset while this webhook is
+active.
+
+### 4.5 Critical state requirement
 
 The render job writes `state/telegram.json` with a `pending` entry for the video
-message. The bot job reads that file to match an `upload` reply to the correct
-video metadata.
+message. The bot uses that state for original metadata, matching an un-replied
+`upload` when there is only one pending video, and duplicate protection. Replying
+directly to the video also includes media and caption data in Telegram's update,
+so the bot can recover basic metadata if the state entry is missing.
 
-Both workflows commit the state file back to the repo. For this to work:
+The `Daily video`, `Telegram bot` (polling), and `Telegram webhook upload`
+workflows commit state back to the repo. For this to work:
 
 1. Open **Settings -> Actions -> General**.
 2. Under **Workflow permissions**, select **Read and write permissions**.
 3. Save.
 
-If Read/write is disabled, the bot cannot see the pending video and `upload`
-appears to do nothing. The same happens with the old workflow command
+If Read/write is disabled, the workflows cannot save pending/upload state or
+duplicate-upload results. An un-replied `upload` will not work without the saved
+pending state. The same happened with the old workflow command
 `git add state/telegram.json scripts.json`: if `scripts.json` did not exist, the
 entire `git add` failed and the pending state was never committed. The included
 workflows add `state` and `scripts.json` separately to avoid this.
 
-### 4.5 Review and upload
+### 4.6 Review and upload
 
 1. The `Daily video` workflow sends the rendered video to your chat.
 2. **Reply to that exact video message** with:
@@ -255,7 +350,7 @@ workflows add `state` and `scripts.json` separately to avoid this.
 `upload` must be a reply to the video message. Replying to the "remaining
 scripts" text message cannot identify which video to publish.
 
-### 4.6 Commands
+### 4.7 Commands
 
 ```text
 /add আমার নতুন বাংলা ভিডিওর বিষয়
@@ -267,7 +362,7 @@ scripts" text message cannot identify which video to publish.
 `/add` appends to the end of `scripts.json`. The bot also sends the remaining
 script count after each review video.
 
-### 4.7 Duplicate protection
+### 4.8 Duplicate protection
 
 `state/telegram.json` stores, per video:
 
@@ -370,7 +465,9 @@ python -m autovid publish --dir out/<your-video-directory>
 
 Important:
 
-* Keep `publish.privacy: private` until the full flow is verified.
+* `config.yaml` currently sets `publish.privacy: public`. Once you reply
+  `upload`, YouTube makes the video public. Set it to `private` before testing
+  if you want uploads hidden from viewers.
 * The default YouTube quota is 10,000 units/day; an upload costs about 1,600
   units, so roughly six uploads per day on the free quota.
 * A successful upload returns `https://youtube.com/shorts/<video-id>`.
@@ -570,14 +667,15 @@ Otherwise keep `publish.instagram: false`; the bot will report it as skipped.
 1. Open the **Actions** tab.
 2. Enable workflows if GitHub asks.
 3. Run **Daily video** once manually to test rendering.
-4. Run **Telegram bot** once manually to test polling.
+4. In webhook mode, test `/start` and `/remaining` in Telegram. Run
+   **Telegram bot** manually only when intentionally using polling mode.
 
 ### 8.2 Workflow schedule
 
 * `Daily video`: `0 4 * * *` UTC (10:00 Bangladesh time).
 * `Telegram bot`: `*/5 * * * *` (every five minutes).
 
-Both share the `autovid-state` concurrency group and commit:
+All three workflows share the `autovid-state` concurrency group and commit:
 
 * `state/done.json`
 * `state/telegram.json`
@@ -596,17 +694,18 @@ mapping.
 1. `python -m autovid voice-check` prints `READY` (or you intentionally use the
    Gemini/Edge fallback).
 2. If Facebook is enabled: `python -m autovid facebook-check` prints `READY`.
-3. **Actions -> Telegram bot -> Run workflow** succeeds.
-4. Send `/help` to the bot and receive the help text.
-5. Send `/add Test topic` and receive the new remaining count.
-6. Run **Daily video** manually, or wait for the schedule, and receive the review
+3. Send `/start` or `/help` and receive the command response in webhook mode, or
+   run **Telegram bot** with polling explicitly enabled in polling mode.
+4. Send `/add Test topic` and receive the new remaining count.
+5. Run **Daily video** manually, or wait for the schedule, and receive the review
    video.
-7. Reply `upload` to that video.
-8. Wait for the bot workflow (up to five minutes) or run `bot-poll --watch`.
-9. Confirm the `✅ YouTube` line in the Telegram report (plus `✅ Facebook` if
+6. Reply `upload` to that video.
+7. In webhook mode, confirm `Telegram webhook upload` starts in GitHub Actions.
+   In polling mode, wait for the scheduled poll or run `bot-poll --watch`.
+8. Confirm the `✅ YouTube` line in the Telegram report (plus `✅ Facebook` if
    enabled).
-10. Confirm the YouTube Shorts URL opens, and the Facebook Reel if enabled.
-11. Reply `upload` again and confirm the bot returns the same links instead of
+9. Confirm the YouTube Shorts URL opens, and the Facebook Reel if enabled.
+10. Reply `upload` again and confirm the bot returns the same links instead of
     uploading duplicates.
 
 ---
@@ -615,7 +714,9 @@ mapping.
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| Video arrives, `upload` does nothing | `Telegram bot` workflow missing/disabled | Enable it and run once manually. |
+| Bot commands get no reply | Webhook URL/secrets missing, or webhook not registered | Check Worker secrets and Telegram `getWebhookInfo`; test `/start`. |
+| Webhook `/upload` gets no report | `Telegram webhook upload` workflow missing/failed | Check its workflow run and the GitHub token's `Contents: write` permission. |
+| Polling bot gets no reply | Polling disabled or webhook still set | Choose one mode; set `TELEGRAM_POLLING_ENABLED` only for polling. |
 | `upload` does nothing, workflow runs | `state/telegram.json` not committed | Set workflow permissions to Read and write. |
 | `upload` does nothing, state looks fine | Replied to the wrong message | Reply to the video message itself. |
 | Bot ignores you | `TELEGRAM_CHAT_ID` mismatch | Use the chat ID from `getUpdates`. |
@@ -623,4 +724,4 @@ mapping.
 | YouTube fails | Missing/expired OAuth refresh token, quota | Re-run OAuth Playground; check quota. |
 | Facebook fails | User token instead of Page token, missing permission | Recreate Page token with `pages_manage_posts`; run `facebook-check`. |
 | Instagram skipped | No public HTTPS video URL | Host the MP4 and pass `--public-url`. |
-| Video is private on YouTube | `publish.privacy: private` | Change to `unlisted` or `public` after testing. |
+| YouTube test upload is visible publicly | `publish.privacy: public` (the current setting) | Set `publish.privacy: private` before the next upload if it should stay hidden. |

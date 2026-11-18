@@ -5,6 +5,10 @@ and publishes an approved video to **YouTube Shorts** when you reply `upload` to
 the review message. **Facebook Reels** is supported but currently disabled; see
 [Facebook requirements](#facebook-requirements) to turn it on.
 
+YouTube visibility is currently set to **public** in `config.yaml`. Replying
+`upload` approves the video and publishes it publicly. Change
+`publish.privacy` to `private` if you want approved test uploads hidden.
+
 ```text
 topics.txt or Telegram /add
         -> Gemini research and Bengali script
@@ -24,15 +28,16 @@ topics.txt or Telegram /add
 The project is designed to work within free quotas. Provider limits and model
 names change, so check the provider dashboards if a service rejects a request.
 
-| Purpose | Primary provider | Fallback | Secrets |
-|---|---|---|---|
-| Research and script | Gemini (Google AI Studio) | — | `GEMINI_API_KEY` |
-| Images | Cloudflare Workers AI | Pollinations | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
-| Voice | ElevenLabs | Gemini TTS, then Edge TTS | `ELEVENLABS_API_KEY` (optional) |
-| Telegram review and commands | Telegram Bot API | — | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
-| YouTube upload | YouTube Data API | — | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
-| Facebook Reels upload | Meta Graph API | — | `FB_PAGE_ID`, `FB_PAGE_TOKEN` |
-| Scheduling and state | GitHub Actions | — | automatic `GITHUB_TOKEN` |
+| Purpose | Provider and fallback | Where credentials go |
+|---|---|---|
+| Research and script | Gemini (Google AI Studio) | GitHub Actions secret `GEMINI_API_KEY` |
+| Images | Cloudflare Workers AI, then Pollinations | GitHub Actions secrets `CF_ACCOUNT_ID`, `CF_API_TOKEN` (optional; Pollinations is the fallback) |
+| Voice | ElevenLabs, then Gemini TTS, then Edge TTS | GitHub Actions secret `ELEVENLABS_API_KEY` (optional) |
+| Telegram review video | Telegram Bot API | GitHub Actions secrets `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Telegram webhook commands | Cloudflare Worker | Cloudflare Worker secrets; see [Telegram webhook setup](#instant-telegram-webhook-cloudflare-worker) |
+| YouTube upload | YouTube Data API | GitHub Actions secrets `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
+| Facebook Reels upload | Meta Graph API (disabled by default) | GitHub Actions secrets `FB_PAGE_ID`, `FB_PAGE_TOKEN` when enabled |
+| Scheduling and repository state | GitHub Actions | Automatic `GITHUB_TOKEN` provided to each workflow |
 
 Google AI Studio is used **only** for Gemini script generation and Gemini TTS.
 It has nothing to do with Facebook. Facebook Reels use Meta's free Graph API,
@@ -45,30 +50,43 @@ The configured voice order is:
 2. Gemini `gemini-3.8-flash-tts`, with a warm Bangladeshi Bengali style.
 3. Microsoft Edge `bn-BD-NabanitaNeural`, which needs no API key.
 
-## Required GitHub Actions secrets
+## GitHub Actions secrets
 
-Add these at **Repository -> Settings -> Secrets and variables -> Actions**:
+Add the secrets required by the features you use at **Repository -> Settings ->
+Secrets and variables -> Actions**.
+
+Required for daily video generation and Telegram review:
 
 ```text
 GEMINI_API_KEY
-CF_ACCOUNT_ID
-CF_API_TOKEN
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
+```
+
+Required to publish to YouTube after you approve a video:
+
+```text
 YT_CLIENT_ID
 YT_CLIENT_SECRET
 YT_REFRESH_TOKEN
-FB_PAGE_ID
-FB_PAGE_TOKEN
 ```
 
-Optional:
+Optional or feature-specific:
 
 ```text
+CF_ACCOUNT_ID          # Cloudflare Images; Pollinations is the fallback
+CF_API_TOKEN           # Cloudflare Images; Pollinations is the fallback
 ELEVENLABS_API_KEY   # enables the most natural voice
 FAL_KEY              # only if you switch image/image-to-video providers to Fal
 IG_USER_ID           # only for Instagram Reels
+FB_PAGE_ID            # required only when Facebook publishing is enabled
+FB_PAGE_TOKEN         # required only when Facebook publishing is enabled
 ```
+
+The Cloudflare Telegram Worker has its own secrets, separate from GitHub
+Actions. The same Telegram bot token and chat ID are used in both places. The
+Worker also needs `TELEGRAM_WEBHOOK_SECRET` and a GitHub fine-grained token
+stored as its `GITHUB_TOKEN` secret.
 
 ### GitHub workflow permission
 
@@ -83,8 +101,10 @@ Enable it once:
 4. Save.
 
 This lets Actions commit `state/done.json`, `state/telegram.json`, and
-`scripts.json`. **If this is disabled, the review state does not reach the bot
-workflow and `upload` will appear to do nothing.**
+`scripts.json`. **If this is disabled, upload workflows cannot save state or
+queue changes.** Replying directly to the review video can still provide
+fallback metadata, but matching an un-replied upload and duplicate protection
+depend on saved state.
 
 ## Local setup
 
@@ -142,10 +162,12 @@ To activate polling as a fallback:
    `curl -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"`.
 2. In **Settings -> Secrets and variables -> Actions -> Variables**, create or
    update `TELEGRAM_POLLING_ENABLED` to `true`.
-3. Re-enable the webhook and set the variable back to `false` after recovery.
+3. To return to webhook mode, set the variable to `false` or delete it first,
+   then register the webhook again.
 
-Both workflows share the `autovid-state` concurrency group, so they never commit
-the same state file at the same time.
+All three workflows (`Daily video`, polling `Telegram bot`, and
+`Telegram webhook upload`) share the `autovid-state` concurrency group, so they
+do not commit the same state files concurrently.
 
 ### Instant local bot (optional)
 
@@ -159,48 +181,79 @@ python -m autovid bot-poll --watch
 Keep the terminal open. It uses Telegram long polling and the same
 `state/telegram.json` file.
 
-Do not run the local watcher and the GitHub `Telegram bot` workflow at the same
-time: Telegram allows only one `getUpdates` consumer per bot token, and the
-second one will fail with a `Conflict` error.
+Do not use local or GitHub polling while the Cloudflare webhook is active.
+Telegram does not allow webhook delivery and `getUpdates` polling to receive
+updates for the same bot at the same time.
 
 ### Instant Telegram webhook (Cloudflare Worker)
 
-The repository includes [`cloudflare-worker/`](./cloudflare-worker), which
-avoids GitHub's five-minute cron delay. Cloudflare's free Workers plan currently
-allows 100,000 requests per day, which is sufficient for a personal bot.
+The repository includes [`cloudflare-worker/`](./cloudflare-worker), deployed as
+`autovid-telegram` at
+`https://autovid-telegram.smsmorsalin.workers.dev`. It avoids GitHub's five-minute
+polling delay.
 
-The Worker handles `/add`, `/remaining`, and help replies directly. For
-`upload`, it immediately acknowledges the message and starts the
-`Telegram webhook upload` GitHub workflow; the workflow performs the existing
-YouTube/Facebook upload and commits state.
+The Worker handles `/start`, `/help`, `/add`, and `/remaining` directly. For
+`upload`, it acknowledges the message and dispatches the
+`Telegram webhook upload` GitHub Actions workflow. That workflow downloads the
+video, publishes to enabled platforms, and commits updated state.
 
-Setup:
+Setup or redeploy:
 
-1. Create a Cloudflare Worker and deploy `cloudflare-worker/index.js` with
-   `npx wrangler deploy` (from that directory).
-2. Add Worker secrets:
-
-   ```bash
-   npx wrangler secret put TELEGRAM_BOT_TOKEN
-   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-   npx wrangler secret put GITHUB_TOKEN
-   npx wrangler secret put TELEGRAM_CHAT_ID
-   ```
-
-   `GITHUB_TOKEN` must be a GitHub fine-grained token for `smsmorsalin/autovid`
-   with **Contents: read and write** and **Actions: read and write**. Set these
-   non-secret variables in the Worker: `GITHUB_REPO=smsmorsalin/autovid`,
-   `GITHUB_BRANCH=main`; the repository and branch are already in
-   `cloudflare-worker/wrangler.toml`.
-3. Set the Telegram webhook, replacing the Worker URL and secret:
+1. In Cloudflare **Workers & Pages**, create a Worker named
+   `autovid-telegram` if it does not already exist.
+2. From the repository's `cloudflare-worker/` directory, log in and deploy:
 
    ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-     -d "url=https://<WORKER>.workers.dev" \
-     -d "secret_token=<WEBHOOK_SECRET>"
+   npx wrangler login
+   npx wrangler deploy
    ```
 
-4. Confirm the `Telegram webhook upload` workflow exists under GitHub Actions.
+3. In the Worker's **Settings -> Variables and Secrets**, add these as **Production
+   Secrets** (not plain variables):
+
+   ```text
+   TELEGRAM_BOT_TOKEN
+   TELEGRAM_CHAT_ID
+   TELEGRAM_WEBHOOK_SECRET
+   GITHUB_TOKEN
+   ```
+
+   `GITHUB_TOKEN` is a GitHub fine-grained token limited to `smsmorsalin/autovid`
+   with **Contents: read and write**. Store that token as a Cloudflare Worker
+   secret; GitHub does not allow a GitHub Actions secret name starting with
+   `GITHUB_`. The non-secret `GITHUB_REPO` and `GITHUB_BRANCH`
+   values are already in `cloudflare-worker/wrangler.toml`.
+4. Register the webhook using the Worker URL and the same webhook secret. Run
+   each line separately. When prompted, paste the value; it will not appear on
+   screen:
+
+   ```bash
+   read -rsp "Telegram bot token: " BOT_TOKEN; echo
+   ```
+
+   Enter the token, then run:
+
+   ```bash
+   read -rsp "Webhook secret: " WEBHOOK_SECRET; echo
+   ```
+
+   Enter the same secret saved in Cloudflare, then run:
+
+   ```bash
+   curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+     --data-urlencode "url=https://autovid-telegram.smsmorsalin.workers.dev" \
+     --data-urlencode "secret_token=${WEBHOOK_SECRET}"
+   ```
+
+   Clear the temporary shell values:
+
+   ```bash
+   unset BOT_TOKEN WEBHOOK_SECRET
+   ```
+
+5. Confirm the `Telegram webhook upload` workflow exists on GitHub and set
+   `TELEGRAM_POLLING_ENABLED` to `false` or remove that Actions variable. Test
+   `/start` and `/remaining` in Telegram.
 
 Keep the old polling workflow disabled while the webhook is active. Telegram
 does not allow a webhook and `getUpdates` polling consumer to run together.
@@ -297,11 +350,13 @@ publish:
   youtube: true
   facebook: false        # set true after FB_PAGE_ID / FB_PAGE_TOKEN are configured
   instagram: false
-  privacy: private
+  privacy: public
 ```
 
-Start with `privacy: private`, verify the full Telegram-to-YouTube flow, and only
-then change it to `unlisted` or `public`.
+The current setting is `privacy: public`: replying `upload` approves the video
+and makes it public on YouTube. `require_approval: true` delays publishing until
+you reply; it does not make an approved upload private. For private review
+uploads, change this to `privacy: private` before running the workflow.
 
 ### ElevenLabs voice
 
@@ -415,28 +470,40 @@ generate a fresh long-lived Page token and update the secret.
 
 ## Troubleshooting
 
-### `upload` does nothing
+### Telegram command or `upload` does nothing
 
 Check, in order:
 
-1. **Is the `Telegram bot` workflow enabled?** Open **Actions -> Telegram bot**
-   and run it once with **Run workflow**.
-2. **Does the reply point at the video?** Replying `upload` to the "remaining
+1. **Which Telegram mode is active?** With the Cloudflare webhook, confirm its
+   URL is `https://autovid-telegram.smsmorsalin.workers.dev`, its four Worker
+   secrets are set, and Telegram's `getWebhookInfo` reports that URL. Do not run
+   the polling workflow at the same time.
+2. **For polling mode only:** enable `TELEGRAM_POLLING_ENABLED` and run the
+   `Telegram bot` workflow. Disable the webhook before polling.
+3. **Does the reply point at the video?** Replying `upload` to the "remaining
    scripts" text message will not work.
-3. **Is `TELEGRAM_CHAT_ID` correct?** Messages from other chats are ignored.
-4. **Did the daily workflow commit `state/telegram.json`?** Open the file on
-   GitHub after a video is sent. It must contain a `pending` entry with the
-   Telegram message ID. The old workflow used
-   `git add state/telegram.json scripts.json`; when `scripts.json` did not exist
-   yet, that whole `git add` failed and the pending review was never committed.
-   The workflows now add `state` and `scripts.json` separately.
-5. **Are workflow permissions Read and write?** Without this the state commit
+4. **Is `TELEGRAM_CHAT_ID` correct?** Messages from other chats are ignored.
+5. **Did the daily workflow save and commit `state/telegram.json`?** The pending
+   entry supplies full metadata, supports plain `upload` when one video is
+   waiting, and records duplicate-upload results. Replying directly to the
+   review video can recover basic metadata if that entry is missing. The old
+   workflow used `git add state/telegram.json scripts.json`; when `scripts.json`
+   did not exist yet, that whole `git add` failed. The workflows now add `state`
+   and `scripts.json` separately.
+6. **Are workflow permissions Read and write?** Without this the state commit
    fails, and the bot cannot match the reply.
-6. **Is the `upload` command in the chat you configured?** Only one chat is
+7. **Is the `upload` command in the chat you configured?** Only one chat is
    accepted.
 
-Run once manually with `python -m autovid bot-poll` (or `--watch`) and read the
-log. It prints every processed update and every platform error.
+For Cloudflare mode, inspect the Worker's **Observability -> Logs** and the
+`Telegram webhook upload` workflow run. For polling mode, run
+`python -m autovid bot-poll` (or `--watch`) and read its log.
+
+### YouTube upload is public
+
+`config.yaml` currently sets `publish.privacy: public`. Replying `upload` is
+approval to publish publicly. Set it to `private` before the next run if you
+want test uploads hidden.
 
 ### ElevenLabs voice is not used
 
@@ -466,5 +533,6 @@ public hosting step. Set `publish.instagram: false` unless you implement one.
 ## Safety and quality
 
 Review every generated video before publishing. AI research can misstate facts,
-and generated images or narration may need correction. Keep `privacy: private`
-until the output, metadata, voice, and approval flow are trusted.
+and generated images or narration may need correction. The current YouTube
+privacy setting is `public`; set `privacy: private` in `config.yaml` if you want
+approved test uploads to remain private.
