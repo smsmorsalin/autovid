@@ -238,9 +238,11 @@ https://autovid-telegram.smsmorsalin.workers.dev
 ```
 
 The Worker responds to `/start`, `/help`, `/add`, and `/remaining`. For `upload`,
-it acknowledges the message and starts the `Telegram webhook upload` GitHub
-Actions workflow. That workflow downloads the video, publishes it, and commits
-updated Telegram state.
+it acknowledges Telegram immediately, dispatches the `Telegram webhook upload`
+GitHub Actions workflow in the background, and then confirms processing started.
+That workflow downloads the video, publishes it, and commits updated Telegram
+state. If dispatch fails, the Worker sends an error reply rather than allowing
+Telegram to retry the same update and repeat the acknowledgement.
 
 Create or update these as **Production Secrets** for the `autovid-telegram`
 Worker in **Workers & Pages -> Settings -> Variables and Secrets**:

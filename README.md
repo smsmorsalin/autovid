@@ -193,9 +193,11 @@ The repository includes [`cloudflare-worker/`](./cloudflare-worker), deployed as
 polling delay.
 
 The Worker handles `/start`, `/help`, `/add`, and `/remaining` directly. For
-`upload`, it acknowledges the message and dispatches the
-`Telegram webhook upload` GitHub Actions workflow. That workflow downloads the
-video, publishes to enabled platforms, and commits updated state.
+`upload`, it acknowledges Telegram immediately, dispatches the
+`Telegram webhook upload` GitHub Actions workflow in the background, then
+confirms that processing started. That workflow downloads the video, publishes
+to enabled platforms, and commits updated state. If dispatch fails, the Worker
+sends an error reply instead of allowing Telegram to repeat the update.
 
 Setup or redeploy:
 

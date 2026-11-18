@@ -99,61 +99,89 @@ async function dispatchUpload(env, update) {
   });
 }
 
+async function processUpdate(env, update) {
+  const message = update.message;
+  if (!message) return;
+  const chatId = String(message.chat?.id || "");
+  const raw = String(message.text || "").trim();
+  const [first, ...rest] = raw.split(/\s+/);
+  const command = first.toLowerCase().split("@", 1)[0];
+  const argument = rest.join(" ").trim();
+
+  if (["/start", "start", "/help", "help"].includes(command)) {
+    await sendTelegram(env, chatId, "Use upload to publish a review video, /add <topic> to queue a script, or /remaining to see the queue.");
+  } else if (["/remaining", "/remaning", "remaining", "remaning", "/queue", "queue"].includes(command)) {
+    await sendTelegram(env, chatId, `বাকি স্ক্রিপ্ট: ${await queueCount(env)}`);
+  } else if (["/add", "add"].includes(command)) {
+    if (!argument) {
+      await sendTelegram(env, chatId, "ব্যবহার: /add <বাংলা স্ক্রিপ্ট বা টপিক>");
+    } else if (argument.length > 500) {
+      await sendTelegram(env, chatId, "স্ক্রিপ্ট 500 অক্ষরের বেশি হতে পারবে না।");
+    } else {
+      const file = await readFile(env, "scripts.json");
+      const queue = file.text ? JSON.parse(file.text) : [];
+      const parts = argument.split("|");
+      const hasStyle = ["explainer", "timeline3d"].includes(parts[0].trim());
+      const style = hasStyle ? parts[0].trim() : "explainer";
+      const topic = hasStyle ? parts.slice(1).join("|").trim() : argument;
+      queue.push({ topic, style, done: false });
+      await writeFile(env, "scripts.json", JSON.stringify(queue, null, 2) + "\n", file.sha, "autovid: add Telegram script");
+      await sendTelegram(env, chatId, `স্ক্রিপ্ট তালিকায় যোগ হয়েছে। বাকি: ${await queueCount(env)}`);
+    }
+  } else if (["upload", "/upload"].includes(command)) {
+    const reply = message.reply_to_message;
+    if (!reply) {
+      const state = await readFile(env, "state/telegram.json");
+      const pending = state.text ? (JSON.parse(state.text).pending || {}) : {};
+      if (!Object.keys(pending).length) {
+        await sendTelegram(env, chatId, "কোনো ভিডিও আপলোডের জন্য অপেক্ষমাণ নেই। আগে একটি ভিডিও রিভিউ মেসেজ তৈরি করুন।");
+        return;
+      }
+    }
+    await dispatchUpload(env, update);
+    await sendTelegram(env, chatId, "আপলোড প্রসেসিং শুরু হয়েছে। শেষ হলে ফলাফল জানানো হবে।");
+  }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method !== "POST") return json({ ok: true, service: "autovid telegram webhook" });
     if (env.TELEGRAM_WEBHOOK_SECRET &&
         request.headers.get("x-telegram-bot-api-secret-token") !== env.TELEGRAM_WEBHOOK_SECRET) {
       return json({ ok: false }, 401);
     }
-    try {
-      const update = await request.json();
-      const message = update.message;
-      if (!message) return json({ ok: true });
-      const chatId = String(message.chat?.id || "");
-      if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return json({ ok: true });
-      const raw = String(message.text || "").trim();
-      const [first, ...rest] = raw.split(/\s+/);
-      const command = first.toLowerCase().split("@", 1)[0];
-      const argument = rest.join(" ").trim();
 
-      if (["/start", "start", "/help", "help"].includes(command)) {
-        await sendTelegram(env, chatId, "Use upload to publish a review video, /add <topic> to queue a script, or /remaining to see the queue.");
-      } else if (["/remaining", "/remaning", "remaining", "remaning", "/queue", "queue"].includes(command)) {
-        await sendTelegram(env, chatId, `বাকি স্ক্রিপ্ট: ${await queueCount(env)}`);
-      } else if (["/add", "add"].includes(command)) {
-        if (!argument) {
-          await sendTelegram(env, chatId, "ব্যবহার: /add <বাংলা স্ক্রিপ্ট বা টপিক>");
-        } else if (argument.length > 500) {
-          await sendTelegram(env, chatId, "স্ক্রিপ্ট 500 অক্ষরের বেশি হতে পারবে না।");
-        } else {
-          const file = await readFile(env, "scripts.json");
-          const queue = file.text ? JSON.parse(file.text) : [];
-          const parts = argument.split("|");
-          const hasStyle = ["explainer", "timeline3d"].includes(parts[0].trim());
-          const style = hasStyle ? parts[0].trim() : "explainer";
-          const topic = hasStyle ? parts.slice(1).join("|").trim() : argument;
-          queue.push({ topic, style, done: false });
-          await writeFile(env, "scripts.json", JSON.stringify(queue, null, 2) + "\n", file.sha, "autovid: add Telegram script");
-          await sendTelegram(env, chatId, `স্ক্রিপ্ট তালিকায় যোগ হয়েছে। বাকি: ${await queueCount(env)}`);
-        }
-      } else if (["upload", "/upload"].includes(command)) {
-        const reply = message.reply_to_message;
-        if (!reply) {
-          const state = await readFile(env, "state/telegram.json");
-          const pending = state.text ? (JSON.parse(state.text).pending || {}) : {};
-          if (!Object.keys(pending).length) {
-            await sendTelegram(env, chatId, "কোনো ভিডিও আপলোডের জন্য অপেক্ষমাণ নেই। আগে একটি ভিডিও রিভিউ মেসেজ তৈরি করুন।");
-            return json({ ok: true });
-          }
-        }
-        await sendTelegram(env, chatId, "আপলোড প্রসেসিং শুরু হয়েছে। শেষ হলে ফলাফল জানানো হবে।");
-        await dispatchUpload(env, update);
-      }
-      return json({ ok: true });
+    let update;
+    try {
+      update = await request.json();
     } catch (error) {
-      console.error(error);
-      return json({ ok: false, error: "request failed" }, 500);
+      console.error("Invalid Telegram update JSON", error);
+      return json({ ok: false }, 400);
     }
+
+    const message = update.message;
+    if (!message) return json({ ok: true });
+    const chatId = String(message.chat?.id || "");
+    if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return json({ ok: true });
+
+    // Acknowledge Telegram before making GitHub or Bot API calls. Telegram retries
+    // webhook updates when it receives a non-2xx response or waits too long; those
+    // retries used to resend the "upload started" message and dispatch the job again.
+    ctx.waitUntil((async () => {
+      try {
+        await processUpdate(env, update);
+      } catch (error) {
+        console.error("Telegram update processing failed", {
+          updateId: update.update_id,
+          error: String(error),
+        });
+        try {
+          await sendTelegram(env, chatId, "⚠️ কমান্ডটি সম্পন্ন করা যায়নি। Cloudflare Worker logs বা GitHub Actions run দেখুন।");
+        } catch (replyError) {
+          console.error("Could not send Telegram failure reply", String(replyError));
+        }
+      }
+    })());
+    return json({ ok: true });
   },
 };
