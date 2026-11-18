@@ -11,6 +11,7 @@
 Both jobs must persist this file (the GitHub workflows commit it back to the repo).
 Without that shared file the bot cannot match an "upload" reply to the review video.
 """
+import os
 import pathlib
 
 import requests
@@ -45,6 +46,21 @@ def _send(token, chat_id, text):
     )
     response.raise_for_status()
     return response.json().get("result", {})
+
+
+def telegram_message(text):
+    """Send a plain status or error update to the configured Telegram chat."""
+    token, chat = env("TELEGRAM_BOT_TOKEN", False), env("TELEGRAM_CHAT_ID", False)
+    if not token or not chat:
+        log("Telegram not configured, skipping status notification")
+        return None
+    safe_text = str(text)
+    for key, value in os.environ.items():
+        if value and len(value) >= 8 and any(
+            marker in key.upper() for marker in ("TOKEN", "SECRET", "API_KEY", "CLIENT_SECRET", "REFRESH")
+        ):
+            safe_text = safe_text.replace(value, "[redacted]")
+    return _send(token, chat, safe_text)
 
 
 def telegram(out_dir, text_extra="", remaining=None):

@@ -59,4 +59,26 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}" && break
             echo "push attempt ${attempt} failed, retrying"
             sleep 5
+
+      - name: Notify Telegram about workflow failure
+        if: failure()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -f "$RUNNER_TEMP/autovid-error-notified" ]; then
+            echo "Detailed exception alert was already sent from the Autovid process."
+            exit 0
+          fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram credentials are unavailable; cannot send failure alert."
+            exit 0
+          fi
+          MESSAGE="⚠️ Telegram upload workflow ব্যর্থ হয়েছে। Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl --connect-timeout 10 --max-time 20 --silent --show-error --fail \
+            --request POST \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
           done

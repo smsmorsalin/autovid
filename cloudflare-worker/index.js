@@ -69,6 +69,14 @@ async function sendTelegram(env, chatId, text) {
   if (!response.ok) throw new Error(`Telegram API ${response.status}`);
 }
 
+function safeErrorMessage(error, env) {
+  let message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  for (const secret of [env.GITHUB_TOKEN, env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET]) {
+    if (secret) message = message.split(secret).join("[redacted]");
+  }
+  return message.replace(/\s+/g, " ").slice(0, 700);
+}
+
 async function queueCount(env) {
   const [scripts, topics, done] = await Promise.all([
     readFile(env, "scripts.json"),
@@ -130,13 +138,26 @@ async function processUpdate(env, update) {
     }
   } else if (["upload", "/upload"].includes(command)) {
     const reply = message.reply_to_message;
-    if (!reply) {
-      const state = await readFile(env, "state/telegram.json");
-      const pending = state.text ? (JSON.parse(state.text).pending || {}) : {};
-      if (!Object.keys(pending).length) {
-        await sendTelegram(env, chatId, "কোনো ভিডিও আপলোডের জন্য অপেক্ষমাণ নেই। আগে একটি ভিডিও রিভিউ মেসেজ তৈরি করুন।");
+    const state = await readFile(env, "state/telegram.json");
+    const pending = state.text ? (JSON.parse(state.text).pending || {}) : {};
+    const replyId = String(reply?.message_id || "");
+    const replyHasVideo = Boolean(
+      reply?.video || String(reply?.document?.mime_type || "").startsWith("video/")
+    );
+    const matchingPending = replyId ? pending[replyId] : null;
+    const pendingWithVideo = Object.entries(pending).filter(([, item]) => item?.video_file_id);
+
+    if (reply) {
+      if (!replyHasVideo && !matchingPending?.video_file_id) {
+        await sendTelegram(env, chatId, "এই মেসেজের সঙ্গে কোনো আপলোডযোগ্য ভিডিও নেই। ভিডিও রিভিউ মেসেজের reply হিসেবে upload লিখুন।");
         return;
       }
+    } else if (pendingWithVideo.length === 0) {
+      await sendTelegram(env, chatId, "এখন আপলোড করার কোনো ভিডিও নেই। আগে একটি ভিডিও তৈরি করুন বা ভিডিও রিভিউ মেসেজের reply হিসেবে upload লিখুন।");
+      return;
+    } else if (pendingWithVideo.length > 1) {
+      await sendTelegram(env, chatId, "একাধিক ভিডিও অপেক্ষা করছে। যে ভিডিওটি চান তার রিভিউ মেসেজের reply হিসেবে upload লিখুন।");
+      return;
     }
     await dispatchUpload(env, update);
     await sendTelegram(env, chatId, "আপলোড প্রসেসিং শুরু হয়েছে। শেষ হলে ফলাফল জানানো হবে।");
@@ -173,10 +194,14 @@ export default {
       } catch (error) {
         console.error("Telegram update processing failed", {
           updateId: update.update_id,
-          error: String(error),
+          error: safeErrorMessage(error, env),
         });
         try {
-          await sendTelegram(env, chatId, "⚠️ কমান্ডটি সম্পন্ন করা যায়নি। Cloudflare Worker logs বা GitHub Actions run দেখুন।");
+          await sendTelegram(
+            env,
+            chatId,
+            `⚠️ কমান্ডটি সম্পন্ন করা যায়নি।\nকারণ: ${safeErrorMessage(error, env)}\nGitHub Actions run: https://github.com/${env.GITHUB_REPO}/actions`
+          );
         } catch (replyError) {
           console.error("Could not send Telegram failure reply", String(replyError));
         }

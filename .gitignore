@@ -1,4 +1,51 @@
-out/
+# Python bytecode and local environments
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+env/
+.env/
+.env.*
+!.env.example
+
+# Build, test, and coverage output
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated videos and temporary output
+out/
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+
+# Cloudflare Wrangler local state and secrets
+.wrangler/
+cloudflare-worker/.dev.vars
+cloudflare-worker/.dev.vars.*
+
+# Node dependencies (for Wrangler or local tooling)
+node_modules/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# Local agent/tool state
+.impeccable/

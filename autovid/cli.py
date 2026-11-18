@@ -88,6 +88,15 @@ def mark_done(topic, style, out_dir):
         _scripts_file().write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _notify_publish_result(result):
+    lines = ["Publish report:"]
+    for platform, url in result.get("results", {}).items():
+        lines.append(f"✅ {platform}: {url}")
+    for platform, error in result.get("errors", {}).items():
+        lines.append(f"❌ {platform}: {str(error)[:700]}")
+    notify.telegram_message("\n".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="autovid")
     ap.add_argument("--config", default=None)
@@ -136,6 +145,7 @@ def main():
         style, topic = next_topic(a.topics)
         if not topic:
             log("no pending topics in", a.topics)
+            notify.telegram_message("আজকের জন্য কোনো নতুন ভিডিও টপিক বাকি নেই। নতুন টপিক যোগ হলে পরের নির্ধারিত সময়ে তৈরি হবে।")
             return
         from . import pipeline
         ep = cfg["series"].get("episode_start", 1) + len(_done())
@@ -147,10 +157,16 @@ def main():
         message_id = notify.telegram(out, remaining=max(0, pending_script_count() - 1))
         mark_done(topic, style, out)
         if message_id and not cfg["publish"].get("require_approval", True):
-            publish.publish_all(out, cfg)
+            _notify_publish_result(publish.publish_all(out, cfg))
 
     elif a.cmd == "publish":
-        publish.publish_all(a.dir, cfg, a.public_url)
+        result = publish.publish_all(a.dir, cfg, a.public_url)
+        if result.get("errors"):
+            errors = "; ".join(
+                f"{platform}: {error}" for platform, error in result["errors"].items()
+            )
+            raise RuntimeError(f"Publish failed: {errors}")
+        _notify_publish_result(result)
 
     elif a.cmd == "bot-poll":
         from .telegram_bot import poll
