@@ -529,6 +529,22 @@ For Cloudflare mode, inspect the Worker's **Observability -> Logs** and the
 `Telegram webhook upload` workflow run. For polling mode, run
 `python -m autovid bot-poll` (or `--watch`) and read its log.
 
+### `/add` says `GitHub API 403`
+
+The Cloudflare Worker received the command, but GitHub rejected its
+`GITHUB_TOKEN` when it tried to save `scripts.json`. In GitHub, open **Settings
+-> Developer settings -> Personal access tokens -> Fine-grained tokens** and
+check that the token:
+
+1. Has access to the `smsmorsalin/autovid` repository.
+2. Has **Repository permissions -> Contents -> Read and write**.
+
+Then update the `GITHUB_TOKEN` secret in the `autovid-telegram` Cloudflare
+Worker (**Workers & Pages -> autovid-telegram -> Settings -> Variables and
+Secrets**). Do not paste the token into Telegram or a GitHub Actions secret.
+Retry `/add` after saving the Worker secret; no Worker redeployment is needed
+for a secret-value change.
+
 ### YouTube upload is public
 
 `config.yaml` currently sets `publish.privacy: public`. Replying `upload` is

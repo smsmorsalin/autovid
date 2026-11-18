@@ -96,6 +96,9 @@ function safeErrorMessage(error, env) {
   for (const secret of [env.GITHUB_TOKEN, env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET]) {
     if (secret) message = message.split(secret).join("[redacted]");
   }
+  if (message.includes("GitHub API 403") && message.includes("Resource not accessible by personal access token")) {
+    return "GitHub denied the request (403). Update the Cloudflare Worker secret GITHUB_TOKEN with a fine-grained token that has access to smsmorsalin/autovid and Contents: Read and write permission.";
+  }
   return message.replace(/\s+/g, " ").slice(0, 700);
 }
 
