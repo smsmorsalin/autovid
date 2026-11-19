@@ -1,8 +1,8 @@
 language: bn
 
 series:
-  name: "S. M. S. Morsalin."
-  handle: "@smsmorsalin9116"
+  name: "S. M. S. Morsalin"
+  handle: "@sms_morsalin"
   end_line1: "Video credits"
   end_line2: "-Thank you for watching"
   cta: "Follow the channel"
@@ -38,7 +38,7 @@ images:
   fal_model: fal-ai/flux/dev
   openai_model: gpt-image-1
   label_ai_visuals: true
-  label_text: "প্রতীকী দৃশ্য"
+  label_text: "S. M. S. Morsalin"
   style_suffix:
     explainer: "flat vector illustration, dark navy night palette with warm orange accents, soft lamp lighting, clean shapes, no text, no letters, no logos, vertical 9:16 composition"
     timeline3d: "photorealistic 3D render, cinematic natural lighting, soft clouds, detailed, vertical 9:16 composition, no text, no letters, no logos, no real people's faces"
@@ -72,7 +72,7 @@ voice:
 metadata:
   auto: true
   title_max: 70
-  ai_note: "এই ভিডিওর ছবি এআই দিয়ে তৈরি।"
+  ai_note: "এই ভিডিও এআই দিয়ে তৈরি।"
 
 publish:
   require_approval: true
