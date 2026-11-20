@@ -59,6 +59,7 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}" && break
             echo "push attempt ${attempt} failed, retrying"
             sleep 5
+          done
 
       - name: Notify Telegram about workflow failure
         if: failure()
@@ -81,4 +82,3 @@ jobs:
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${MESSAGE}" \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
-          done
