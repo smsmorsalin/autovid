@@ -42,6 +42,28 @@
       "topic": "মোবাইল ফোনের ইতিহাস: টেলিফোন থেকে স্মার্টফোন",
       "dir": "/home/runner/work/autovid/autovid/out/2026-11-19-মোবাইল-ফোনের-ইতিহাস-টেলিফোন-থেকে-স্মার্ট",
       "video_file_id": "BAACAgUAAxkDAANeav7wy-ZrwLc4qU2zIbUlvFrTliQAAnUkAALBqPlXirrdPTa8bKo9BA"
+    },
+    "105": {
+      "title": "API কী এবং এটি কীভাবে কাজ করে? সহজ রেস্টুরেন্ট উদাহরণের মাধ্যমে শিখুন",
+      "description": "এই ভিডিওতে রেস্টুরেন্টের ওয়েটারের উদাহরণের মাধ্যমে এপিআই-এর কাজ ও গুরুত্ব ব্যাখ্যা করা হয়েছে। জানুন কীভাবে সার্ভার এবং ইউজারের মাঝে ডেটা আদান-প্রদান সম্পন্ন হয়।\n\n#API #Programming #WebDevelopment #TechBangla #Shorts\n\nএই ভিডিও এআই দিয়ে তৈরি।\n\nSources:\n- AWS: What is an API? https://aws.amazon.com/what-is/api/\n- MuleSoft: What is an API? https://www.mulesoft.com/resources/api/what-is-api\n- IBM: What is an API? https://www.ibm.com/topics/api",
+      "tags": [
+        "What is API",
+        "API explained in Bengali",
+        "Application Programming Interface",
+        "Programming for beginners",
+        "Bengali Coding Tutorial",
+        "Web Development",
+        "Software Development",
+        "JSON data exchange",
+        "HTTP status codes",
+        "Tech educational video",
+        "Bangla programming",
+        "API concept",
+        "Software Architecture"
+      ],
+      "topic": "API কী: রেস্টুরেন্টের ওয়েটারের উদাহরণ",
+      "dir": "/home/runner/work/autovid/autovid/out/2026-11-20-api-কী-রেস্টুরেন্টের-ওয়েটারের-উদাহরণ",
+      "video_file_id": "BAACAgUAAxkDAANpawABQct3ndcKS6FK56pwUIgzu0yJAAKSJwACyKEAAVTQ3GztQ3vFTj0E"
     }
   },
   "uploaded": {}
