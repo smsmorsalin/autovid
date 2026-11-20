@@ -430,11 +430,34 @@ YT_REFRESH_TOKEN
 ```
 
 The refresh token belongs to the Google account that owns the channel. Never
-commit it. A successful upload returns:
+commit it. Generate it with the Desktop app's installed-app OAuth flow described
+in the full setup guide; OAuth Playground refresh tokens are revoked after 24
+hours and cannot be used for ongoing uploads. A successful upload returns:
 
 ```text
 https://youtube.com/shorts/<video-id>
 ```
+
+Test the OAuth credentials without uploading a video:
+
+```bash
+export YT_CLIENT_ID="..."
+export YT_CLIENT_SECRET="..."
+export YT_REFRESH_TOKEN="..."
+python -m autovid youtube-check
+```
+
+To create a refresh token without downloading an OAuth helper package or
+credential JSON file, use the browser loopback flow:
+
+```bash
+export YT_CLIENT_ID="..."
+export YT_CLIENT_SECRET="..."
+python -m autovid youtube-auth
+```
+
+Approve access in the browser. The command prints `YT_REFRESH_TOKEN=<value>`;
+copy only the value into the GitHub Actions secret.
 
 Full OAuth walkthrough:
 [API_CONNECTION_PROCESS_AND_TELEGRAM_BOT_SETUP.md](./API_CONNECTION_PROCESS_AND_TELEGRAM_BOT_SETUP.md).

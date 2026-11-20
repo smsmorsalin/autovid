@@ -144,7 +144,14 @@ def _publish(token, chat_id, message, pending, file_id, cfg, state, unique_id):
                     results["instagram"] = "skipped: needs a public video URL"
             except (Exception, SystemExit) as exc:
                 log(f"{name} upload failed: {exc}")
-                errors.append(f"{name}: {str(exc)[:700]}")
+                message = str(exc)
+                if "invalid_grant" in message:
+                    message = (
+                        "YouTube OAuth টোকেন বাতিল বা মেয়াদ শেষ। "
+                        "GitHub Secrets YT_CLIENT_ID, YT_CLIENT_SECRET এবং YT_REFRESH_TOKEN "
+                        "নতুন Desktop OAuth flow দিয়ে তৈরি করে আপডেট করুন।"
+                    )
+                errors.append(f"{name}: {message[:700]}")
     finally:
         tmp.unlink(missing_ok=True)
 

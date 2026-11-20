@@ -5,7 +5,11 @@ These call live platform APIs and need real credentials. Start with
 then make the video public.
 """
 import pathlib
+import secrets
 import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
@@ -15,17 +19,36 @@ GRAPH = "https://graph.facebook.com/v21.0"
 
 
 # ------------------------------------------------------------------ YouTube
+def _youtube_oauth_error(response):
+    try:
+        data = response.json()
+        error = data.get("error", "")
+        description = data.get("error_description", "")
+    except Exception:
+        error = ""
+        description = response.text[:400]
+
+    if error == "invalid_grant":
+        return (
+            "YouTube OAuth token exchange failed: invalid_grant. "
+            "The refresh token is expired or revoked. Generate a new refresh token "
+            "with the Desktop OAuth client and update YT_REFRESH_TOKEN together with "
+            "YT_CLIENT_ID and YT_CLIENT_SECRET."
+        )
+    return (
+        f"YouTube OAuth token exchange failed {response.status_code}: "
+        f"{error or 'unknown_error'}"
+        f"{': ' + description if description else ''}"
+    )
+
+
 def youtube(video, meta, cfg):
     """Resumable upload with an OAuth refresh token (YT_CLIENT_ID / YT_CLIENT_SECRET / YT_REFRESH_TOKEN)."""
     tok = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id": env("YT_CLIENT_ID"), "client_secret": env("YT_CLIENT_SECRET"),
         "refresh_token": env("YT_REFRESH_TOKEN"), "grant_type": "refresh_token"}, timeout=60)
     if tok.status_code >= 400:
-        # Google returns a useful OAuth error (for example invalid_grant) in
-        # the response body. Include it so workflow reports identify the fix.
-        raise RuntimeError(
-            f"YouTube OAuth token exchange failed {tok.status_code}: {tok.text[:400]}"
-        )
+        raise RuntimeError(_youtube_oauth_error(tok))
     access = tok.json()["access_token"]
     body = {
         "snippet": {"title": meta["title"][:100], "description": meta["description"][:4900],
@@ -50,6 +73,136 @@ def youtube(video, meta, cfg):
     vid = up.json().get("id")
     log("YouTube uploaded:", f"https://youtube.com/shorts/{vid}")
     return vid
+
+
+def youtube_check():
+    """Verify the YouTube OAuth refresh token without uploading a video."""
+    missing = [name for name in ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
+               if not env(name, False)]
+    if missing:
+        print("YouTube OAuth    : MISSING " + ", ".join(missing))
+        return False
+
+    try:
+        response = requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": env("YT_CLIENT_ID"),
+            "client_secret": env("YT_CLIENT_SECRET"),
+            "refresh_token": env("YT_REFRESH_TOKEN"),
+            "grant_type": "refresh_token",
+        }, timeout=60)
+    except requests.RequestException as exc:
+        print(f"YouTube OAuth    : FAILED network error: {exc}")
+        return False
+
+    if response.status_code >= 400:
+        print("YouTube OAuth    : FAILED " + _youtube_oauth_error(response))
+        return False
+
+    print("YouTube OAuth    : OK (refresh token accepted)")
+    return True
+
+
+def youtube_auth(port=8085):
+    """Create a refresh token using only YT_CLIENT_ID and YT_CLIENT_SECRET.
+
+    This uses Google's loopback installed-app flow and needs no OAuth helper package.
+    The browser approval is interactive and may not run unattended.
+    """
+    client_id = env("YT_CLIENT_ID", False)
+    client_secret = env("YT_CLIENT_SECRET", False)
+    missing = [name for name, value in (
+        ("YT_CLIENT_ID", client_id),
+        ("YT_CLIENT_SECRET", client_secret),
+    ) if not value]
+    if missing:
+        print("YouTube OAuth    : MISSING " + ", ".join(missing))
+        return False
+
+    state = secrets.token_urlsafe(24)
+    redirect_uri = f"http://127.0.0.1:{port}/"
+    captured = {}
+
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            query = parse_qs(urlparse(self.path).query)
+            captured["code"] = (query.get("code") or [None])[0]
+            captured["state"] = (query.get("state") or [None])[0]
+            captured["error"] = (query.get("error") or [None])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h1>Autovid authorization received</h1>"
+                b"<p>You can close this browser tab.</p></body></html>"
+            )
+
+        def log_message(self, format, *args):
+            return
+
+    try:
+        server = HTTPServer(("127.0.0.1", port), CallbackHandler)
+    except OSError as exc:
+        print(f"YouTube OAuth    : FAILED could not open localhost:{port}: {exc}")
+        return False
+
+    auth_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "https://www.googleapis.com/auth/youtube.upload",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(auth_params)
+    print("YouTube OAuth    : approve access in the browser")
+    print(auth_url)
+    webbrowser.open(auth_url)
+
+    try:
+        server.handle_request()
+    finally:
+        server.server_close()
+
+    if captured.get("state") != state:
+        print("YouTube OAuth    : FAILED authorization state mismatch")
+        return False
+    if captured.get("error"):
+        print("YouTube OAuth    : FAILED " + captured["error"])
+        return False
+    if not captured.get("code"):
+        print("YouTube OAuth    : FAILED Google did not return an authorization code")
+        return False
+
+    try:
+        response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": captured["code"],
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        print(f"YouTube OAuth    : FAILED network error: {exc}")
+        return False
+
+    if response.status_code >= 400:
+        print("YouTube OAuth    : FAILED " + _youtube_oauth_error(response))
+        return False
+
+    refresh_token = response.json().get("refresh_token")
+    if not refresh_token:
+        print("YouTube OAuth    : FAILED Google did not return a refresh token")
+        return False
+
+    print("YouTube OAuth    : SUCCESS")
+    print("YT_REFRESH_TOKEN=" + refresh_token)
+    print("Save this value only as the GitHub Actions YT_REFRESH_TOKEN secret.")
+    return True
 
 
 # ------------------------------------------------------------------ Facebook Reels (Page)

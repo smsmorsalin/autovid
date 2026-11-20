@@ -443,19 +443,51 @@ Then set **Settings -> Actions -> General -> Workflow permissions** to
 
 ### 6.4 Get the refresh token
 
-The easiest free method is the OAuth 2.0 Playground:
+Use the Desktop app client from the previous step with Google's installed-app
+OAuth flow. Do not use the OAuth 2.0 Playground for the production token: the
+Playground revokes its refresh tokens after 24 hours.
 
-1. Open <https://developers.google.com/oauthplayground>.
-2. Click the gear icon.
-3. Check **Use your own OAuth credentials**.
-4. Paste your Client ID and Client secret.
-5. In Step 1, find **YouTube Data API v3** and select
-   `https://www.googleapis.com/auth/youtube.upload`.
-6. Click **Authorize APIs** and sign in with the channel owner account.
-7. In Step 2, click **Exchange authorization code for tokens**.
-8. Copy the **Refresh token**.
+1. In **Google Auth Platform -> Clients**, open the Desktop app client and
+   download its JSON file. Keep the file private and outside the repository.
+2. On your computer, install the one-time helper dependency:
+
+   ```bash
+   python -m pip install google-auth-oauthlib
+   ```
+
+3. Save the following as `get_youtube_token.py` in the same folder as the
+   downloaded JSON file. Replace `client_secret.json` with its actual filename:
+
+   ```python
+   from google_auth_oauthlib.flow import InstalledAppFlow
+
+   flow = InstalledAppFlow.from_client_secrets_file(
+       "client_secret.json",
+       scopes=["https://www.googleapis.com/auth/youtube.upload"],
+   )
+   credentials = flow.run_local_server(
+       port=0,
+       access_type="offline",
+       prompt="consent",
+   )
+   print("Refresh token:", credentials.refresh_token)
+   ```
+
+4. Run `python get_youtube_token.py`, sign in with the Google account that owns
+   the YouTube channel, and approve access.
+5. Copy the printed refresh token directly into GitHub Actions secret
+   `YT_REFRESH_TOKEN`. Do not paste it into chat or commit it.
+
+Keep `YT_CLIENT_ID` and `YT_CLIENT_SECRET` paired with the same Desktop app
+client used to generate this token. If you create a different client, update all
+three GitHub secrets together.
 
 The refresh token belongs to the channel owner. Never commit it.
+
+If the OAuth app is External and its publishing status is **Testing**, Google
+limits refresh-token lifetime to 7 days. For ongoing uploads, use Personal use
+mode if available for your account, or complete the applicable production and
+verification setup in Google Auth Platform.
 
 ### 6.5 Store the secrets and test
 
@@ -472,6 +504,24 @@ Test locally with a rendered video:
 ```bash
 python -m autovid publish --dir out/<your-video-directory>
 ```
+
+Before uploading, verify only the OAuth credentials:
+
+```bash
+python -m autovid youtube-check
+```
+
+To create a refresh token without downloading OAuth helper packages or a
+credential JSON file:
+
+```bash
+export YT_CLIENT_ID="..."
+export YT_CLIENT_SECRET="..."
+python -m autovid youtube-auth
+```
+
+Approve access in the browser and copy only the printed refresh-token value
+into the `YT_REFRESH_TOKEN` GitHub Actions secret.
 
 Important:
 

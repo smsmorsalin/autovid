@@ -151,6 +151,10 @@ def main():
 
     f = sub.add_parser("facebook-check", help="test the Facebook Page ID and Page access token")
 
+    y = sub.add_parser("youtube-check", help="test the YouTube OAuth refresh token")
+    ya = sub.add_parser("youtube-auth", help="create a YouTube refresh token via browser authorization")
+    ya.add_argument("--port", type=int, default=8085)
+
     a = ap.parse_args()
     cfg = load_config(a.config)
 
@@ -218,6 +222,14 @@ def main():
     elif a.cmd == "facebook-check":
         from .publish import facebook_check
         raise SystemExit(0 if facebook_check() else 1)
+
+    elif a.cmd == "youtube-check":
+        from .publish import youtube_check
+        raise SystemExit(0 if youtube_check() else 1)
+
+    elif a.cmd == "youtube-auth":
+        from .publish import youtube_auth
+        raise SystemExit(0 if youtube_auth(port=a.port) else 1)
 
 
 if __name__ == "__main__":
