@@ -20,7 +20,12 @@ def youtube(video, meta, cfg):
     tok = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id": env("YT_CLIENT_ID"), "client_secret": env("YT_CLIENT_SECRET"),
         "refresh_token": env("YT_REFRESH_TOKEN"), "grant_type": "refresh_token"}, timeout=60)
-    tok.raise_for_status()
+    if tok.status_code >= 400:
+        # Google returns a useful OAuth error (for example invalid_grant) in
+        # the response body. Include it so workflow reports identify the fix.
+        raise RuntimeError(
+            f"YouTube OAuth token exchange failed {tok.status_code}: {tok.text[:400]}"
+        )
     access = tok.json()["access_token"]
     body = {
         "snippet": {"title": meta["title"][:100], "description": meta["description"][:4900],
