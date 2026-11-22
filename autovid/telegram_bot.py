@@ -48,6 +48,8 @@ def _api(token, method, **kwargs):
 
 
 def _download_video(token, file_id, destination):
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise ValueError("Telegram video file_id is missing")
     info = _api(token, "getFile", data={"file_id": file_id})
     with requests.get(
         f"https://api.telegram.org/file/bot{token}/{info['file_path']}",
@@ -237,6 +239,9 @@ def _handle_message(message, token, cfg, state):
         pending = pending or _meta_from_reply(reply)
         state["pending"][reply_id] = pending
         file_id = attached.get("file_id")
+        if not file_id:
+            _send(token, chat_id, "রিপ্লাই ভিডিওর file_id পাওয়া যায়নি। ভিডিওটি আবার পাঠিয়ে upload করুন।")
+            return
         unique_id = attached.get("file_unique_id") or file_id
         _publish(token, chat_id, message, pending, file_id, cfg, state, unique_id)
         return
