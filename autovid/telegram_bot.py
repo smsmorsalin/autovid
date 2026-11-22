@@ -40,8 +40,10 @@ def _api(token, method, **kwargs):
     response = requests.post(
         f"https://api.telegram.org/bot{token}/{method}", timeout=120, **kwargs
     )
-    response.raise_for_status()
     data = response.json()
+    if not response.ok:
+        description = data.get("description", response.reason)
+        raise RuntimeError(f"Telegram {method} failed ({response.status_code}): {description}")
     if not data.get("ok"):
         raise RuntimeError(f"Telegram {method} failed: {data}")
     return data["result"]
@@ -50,7 +52,9 @@ def _api(token, method, **kwargs):
 def _download_video(token, file_id, destination):
     if not isinstance(file_id, str) or not file_id.strip():
         raise ValueError("Telegram video file_id is missing")
-    info = _api(token, "getFile", data={"file_id": file_id})
+    # Telegram accepts parameters in the query string for POST requests. Keep
+    # file_id there so the API receives it even if a proxy strips form bodies.
+    info = _api(token, "getFile", params={"file_id": file_id})
     with requests.get(
         f"https://api.telegram.org/file/bot{token}/{info['file_path']}",
         timeout=600, stream=True,
